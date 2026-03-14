@@ -92,6 +92,7 @@ def search_index(
     metrics: dict[str, int | str] = {
         "mode": mode,
         "vector_backend": vector_backend,
+        "vector_accelerated": storage.supports_vector_search(),
         "result_count": len(selected),
         "context_tokens": context_tokens,
         "estimated_full_workspace_tokens": full_tokens,

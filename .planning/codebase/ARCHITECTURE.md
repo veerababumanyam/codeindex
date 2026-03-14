@@ -25,7 +25,7 @@
 - MCP entry path is HTTP `POST /mcp` handled in `SearchHandler.do_POST` in `codeindex/server.py`.
 
 ## Data Flow: Index + Query
-1. `codeindex sync` calls `cmd_sync` in `codeindex/cli.py`.
+1. `CodeIndex` calls `cmd_sync` in `codeindex/cli.py`.
 2. `cmd_sync` calls `_run_sync_once`, then `sync_workspace(...)` in `codeindex/indexer.py`.
 3. `sync_workspace` scans files, chunks text via `chunk_text` in `codeindex/embedding.py`, generates embeddings via `embed_text`, extracts symbols, and writes through `Storage.replace_chunks`.
 4. `Storage` persists rows in `files`/`chunks` tables and optional vector virtual tables in `codeindex/storage.py`.

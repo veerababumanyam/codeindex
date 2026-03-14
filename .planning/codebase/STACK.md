@@ -48,5 +48,5 @@
 
 ## Practical Example
 - Initialize project config: `codeindex init --path /myproject --workspace myapp` (`README.md`, `codeindex/cli.py`).
-- Build local index: `codeindex sync`.
+- Build local index: `CodeIndex`.
 - Start service: `codeindex serve --host 127.0.0.1 --port 9090`.

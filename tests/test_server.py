@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import subprocess
 import sys
 import time
@@ -12,6 +13,13 @@ from codeindex.memory_viewer import render_viewer_page
 
 def run_cmd(cmd, cwd):
     return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=True)
+
+
+def merged_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    if extra:
+        env.update(extra)
+    return env
 
 
 def fetch_json(url: str, headers: dict[str, str] | None = None) -> dict:
@@ -83,6 +91,7 @@ def test_search_endpoint_returns_results(tmp_path: Path):
         assert payload["results"][0]["path"] == "auth.py"
         assert payload["metrics"]["mode"] == "hybrid"
         assert payload["metrics"]["vector_backend"] in {"sqlite-vec", "sqlite-vss", "python-cosine"}
+        assert isinstance(payload["metrics"]["vector_accelerated"], bool)
         assert "estimated_tokens_saved" in payload["metrics"]
     finally:
         proc.terminate()
@@ -546,6 +555,7 @@ def test_memory_http_endpoints_and_mcp_tools(tmp_path: Path):
         wait_for_server(proc, f"http://127.0.0.1:{port}/memory/status?workspace=mem")
         status = fetch_json(f"http://127.0.0.1:{port}/memory/status?workspace=mem")
         assert status["observations"] >= 1
+        assert "memory_search_backend" in status["capabilities"]
 
         search = fetch_json(f"http://127.0.0.1:{port}/memory/search?workspace=mem&query=authenticate")
         assert search["results"]
@@ -577,6 +587,121 @@ def test_memory_http_endpoints_and_mcp_tools(tmp_path: Path):
         )
         parsed = json.loads(mcp_search["result"]["content"][0]["text"])
         assert parsed["results"]
+
+        mcp_status = post_json(
+            f"http://127.0.0.1:{port}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "codeindex_memory_status",
+                    "arguments": {"workspace": "mem"},
+                },
+            },
+        )
+        status_payload = json.loads(mcp_status["result"]["content"][0]["text"])
+        assert status_payload["capabilities"]["memory_search_backend"] == status["capabilities"]["memory_search_backend"]
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_search_endpoint_reports_python_cosine_when_vectors_disabled(tmp_path: Path):
+    repo_root = Path(__file__).resolve().parents[1]
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "auth.py").write_text("def authenticate(token):\n    return token\n", encoding="utf-8")
+
+    config = tmp_path / "codeindex.yaml"
+    run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "init", "--path", str(project), "--workspace", "api"],
+        cwd=repo_root,
+    )
+    run_cmd([sys.executable, "-m", "codeindex.cli", "--config", str(config), "sync"], cwd=repo_root)
+
+    port = 9144
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "serve", "--host", "127.0.0.1", "--port", str(port)],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=merged_env({"CODEINDEX_DISABLE_VECTORS": "1"}),
+    )
+    try:
+        wait_for_server(proc, f"http://127.0.0.1:{port}/search?query=authenticate&workspace=api")
+        payload = fetch_json(f"http://127.0.0.1:{port}/search?query=authenticate&workspace=api")
+        assert payload["results"]
+        assert payload["metrics"]["vector_backend"] == "python-cosine"
+        assert payload["metrics"]["vector_accelerated"] is False
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_memory_status_and_search_degrade_without_fts5(tmp_path: Path):
+    repo_root = Path(__file__).resolve().parents[1]
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "auth.py").write_text("def authenticate(token):\n    return token\n", encoding="utf-8")
+
+    config = tmp_path / "codeindex.yaml"
+    env = {"CODEINDEX_DISABLE_FTS5": "1"}
+    run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "init", "--path", str(project), "--workspace", "mem"],
+        cwd=repo_root,
+    )
+    subprocess.run(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "sync"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=True,
+        env=merged_env(env),
+    )
+    subprocess.run(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "query", "authenticate", "--workspace", "mem"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=True,
+        env=merged_env(env),
+    )
+
+    port = 9145
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "serve", "--host", "127.0.0.1", "--port", str(port)],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=merged_env(env),
+    )
+    try:
+        wait_for_server(proc, f"http://127.0.0.1:{port}/memory/status?workspace=mem")
+        status = fetch_json(f"http://127.0.0.1:{port}/memory/status?workspace=mem")
+        assert status["capabilities"]["memory_search_backend"] == "sql-like"
+        assert status["capabilities"]["fts5_available"] is False
+        assert status["capabilities"]["degraded"] is True
+
+        search = fetch_json(f"http://127.0.0.1:{port}/memory/search?workspace=mem&query=authenticate")
+        assert search["results"]
+
+        mcp_status = post_json(
+            f"http://127.0.0.1:{port}/mcp",
+            {
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {
+                    "name": "codeindex_memory_status",
+                    "arguments": {"workspace": "mem"},
+                },
+            },
+        )
+        parsed_status = json.loads(mcp_status["result"]["content"][0]["text"])
+        assert parsed_status["capabilities"]["memory_search_backend"] == "sql-like"
     finally:
         proc.terminate()
         proc.wait(timeout=5)

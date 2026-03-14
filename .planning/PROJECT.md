@@ -1,8 +1,8 @@
-# CodeIndex Sync
+# CodeIndex
 
 ## What This Is
 
-CodeIndex Sync is a local-first developer tool that indexes source code into SQLite and exposes semantic search, code analysis, and persistent project memory. It supports CLI, HTTP, and MCP interfaces so both humans and agents can query the same indexed knowledge. The project is for developers and agentic workflows that need fast, low-token retrieval and explainable code intelligence without depending on external embedding services.
+CodeIndex is a local-first developer tool that indexes source code into SQLite and exposes semantic search, code analysis, and persistent project memory. It supports CLI, HTTP, and MCP interfaces so both humans and agents can query the same indexed knowledge. The project is for developers and agentic workflows that need fast, low-token retrieval and explainable code intelligence without depending on external embedding services.
 
 ## Core Value
 

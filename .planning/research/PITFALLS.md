@@ -1,4 +1,4 @@
-# CodeIndex Sync Hardening Pitfalls
+# CodeIndex Hardening Pitfalls
 
 Scope: practical risks when expanding and hardening local-first indexing, search, analysis, and memory surfaces.
 

@@ -138,7 +138,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     storage = Storage(db_path(config_path.parent.resolve()))
     storage.close()
-    print(f"Initialized CodeIndex Sync at {config_path}")
+    print(f"Initialized CodeIndex at {config_path}")
     return 0
 
 
@@ -252,6 +252,10 @@ def cmd_status(args: argparse.Namespace) -> int:
         memory_service = _memory_service(storage, loaded.data)
         context = _start_memory_context(memory_service, workspace, project_root, "status")
         counts = storage.counts()
+        counts["capabilities"] = {
+            "vector": storage.capability_summary(),
+            "memory": memory_service.capability_summary(),
+        }
         _json_print(counts)
         _finish_memory_context(
             memory_service,
@@ -484,7 +488,6 @@ def cmd_memory_viewer(args: argparse.Namespace) -> int:
         auth_token=str(auth_token) if auth_token is not None else None,
         auth_token_header=auth_token_header,
     )
-    return 0
     return 0
 
 

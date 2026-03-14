@@ -1,10 +1,14 @@
-# CodeIndex Sync
+<p align="center">
+  <img src="logo.png" alt="CodeIndex Logo" width="200">
+</p>
+
+# CodeIndex
 
 Local-first semantic code search, code intelligence analysis, and persistent project memory for AI-assisted development.
 
-`CodeIndex Sync` helps you index a repository into SQLite, run low-token semantic retrieval, analyze code structure (AST, symbols, dependencies, complexity, usage), and expose everything via CLI, HTTP, and MCP JSON-RPC tools.
+`CodeIndex` helps you index a repository into SQLite, run low-token semantic retrieval, analyze code structure (AST, symbols, dependencies, complexity, usage), and expose everything via CLI, HTTP, and MCP JSON-RPC tools.
 
-## Why CodeIndex Sync
+## Why CodeIndex
 
 - Local-first: works without external embedding APIs by default.
 - Incremental indexing: only re-indexes changed files.
@@ -95,7 +99,7 @@ pip install -e ".[analysis]"
 
 ```bash
 codeindex init --path /myproject --workspace myapp --global-docs /shared
-codeindex sync
+CodeIndex
 codeindex query "find auth logic" --workspace myapp --top-k 5 --include-global --mode hybrid
 codeindex status
 ```
@@ -103,7 +107,7 @@ codeindex status
 Run continuous sync:
 
 ```bash
-codeindex sync --watch --interval 2
+CodeIndex --watch --interval 2
 ```
 
 Serve locally by default:
@@ -126,7 +130,7 @@ To protect HTTP and MCP routes, set `server.auth_token` in `codeindex.yaml` or p
 
 - `codeindex init`
 - `codeindex config <key> <value>`
-- `codeindex sync [--watch]`
+- `CodeIndex [--watch]`
 - `codeindex query "<text>" [--mode chunks|symbols|hybrid]`
 - `codeindex status`
 
@@ -231,10 +235,6 @@ Key sections:
 - `excludes`
 - `query.*`
 - `analysis.prefer_tree_sitter`
-- `server.host`
-- `server.port`
-- `server.allow_remote`
-- `server.auth_token`
 - `server.auth_token_header`
 - `memory.*`
 

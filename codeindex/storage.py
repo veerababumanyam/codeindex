@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from array import array
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,6 +77,9 @@ class Storage:
         self.conn.commit()
 
     def _try_enable_vector_extension(self) -> None:
+        if os.getenv("CODEINDEX_DISABLE_VECTORS", "").lower() in {"1", "true", "yes", "on"}:
+            self._vector_backend = "python-cosine"
+            return
         if self._try_enable_sqlite_vec():
             self._vector_backend = "sqlite-vec"
             return
@@ -187,6 +191,14 @@ class Storage:
 
     def vector_backend_name(self) -> str:
         return self._vector_backend
+
+    def capability_summary(self) -> dict[str, object]:
+        accelerated = self.supports_vector_search()
+        return {
+            "backend": self._vector_backend,
+            "accelerated": accelerated,
+            "degraded": not accelerated,
+        }
 
     def _vector_value(self, embedding_or_raw: list[float] | bytes | bytearray | memoryview | str) -> object:
         if self._vector_backend == "sqlite-vss":

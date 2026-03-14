@@ -1,6 +1,8 @@
 import json
+import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -8,8 +10,11 @@ import pytest
 import codeindex.config as config_module
 
 
-def run_cmd(cmd, cwd, check=True):
-    return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=check)
+def run_cmd(cmd, cwd, check=True, env=None):
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+    return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=check, env=merged_env)
 
 
 def test_init_sync_query_status(tmp_path: Path):
@@ -49,12 +54,15 @@ def test_init_sync_query_status(tmp_path: Path):
     assert query_payload["results"]
     assert query_payload["metrics"]["mode"] == "hybrid"
     assert query_payload["metrics"]["vector_backend"] in {"sqlite-vec", "sqlite-vss", "python-cosine"}
+    assert isinstance(query_payload["metrics"]["vector_accelerated"], bool)
     assert "estimated_tokens_saved" in query_payload["metrics"]
 
     status = run_cmd([sys.executable, "-m", "codeindex.cli", "--config", str(config), "status"], cwd=repo_root)
     status_payload = json.loads(status.stdout)
     assert status_payload["files"] >= 1
     assert status_payload["symbols"] >= 1
+    assert status_payload["capabilities"]["vector"]["backend"] in {"sqlite-vec", "sqlite-vss", "python-cosine"}
+    assert "memory_search_backend" in status_payload["capabilities"]["memory"]
 
 
 def test_global_docs_included_by_default(tmp_path: Path):
@@ -421,6 +429,7 @@ def test_memory_cli_commands_capture_and_search(tmp_path: Path):
     status_payload = json.loads(status.stdout)
     assert status_payload["sessions"] >= 1
     assert status_payload["observations"] >= 1
+    assert "memory_search_backend" in status_payload["capabilities"]
 
     search = run_cmd(
         [sys.executable, "-m", "codeindex.cli", "--config", str(config), "memory", "search", "authenticate", "--workspace", "memapp"],
@@ -444,3 +453,89 @@ def test_memory_cli_commands_capture_and_search(tmp_path: Path):
     )
     citations_payload = json.loads(citations.stdout)
     assert citations_payload["citations"]
+
+
+def test_vector_dependencies_are_optional_in_pyproject():
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+
+    dependencies = data["project"]["dependencies"]
+    assert all(not dep.startswith("sqlite-vec") for dep in dependencies)
+    assert all(not dep.startswith("sqlite-vss") for dep in dependencies)
+    assert any(dep.startswith("sqlite-vec") for dep in data["project"]["optional-dependencies"]["vectors"])
+    assert any(dep.startswith("sqlite-vss") for dep in data["project"]["optional-dependencies"]["vectors"])
+
+
+def test_query_and_status_report_python_cosine_when_vectors_disabled(tmp_path: Path):
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "auth.py").write_text("def authenticate(token):\n    return token\n", encoding="utf-8")
+
+    config = tmp_path / "codeindex.yaml"
+    repo_root = Path(__file__).resolve().parents[1]
+    env = {"CODEINDEX_DISABLE_VECTORS": "1"}
+
+    run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "init", "--path", str(project), "--workspace", "fallback"],
+        cwd=repo_root,
+        env=env,
+    )
+    run_cmd([sys.executable, "-m", "codeindex.cli", "--config", str(config), "sync"], cwd=repo_root, env=env)
+
+    query = run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "query", "authenticate", "--workspace", "fallback"],
+        cwd=repo_root,
+        env=env,
+    )
+    query_payload = json.loads(query.stdout)
+    assert query_payload["results"]
+    assert query_payload["metrics"]["vector_backend"] == "python-cosine"
+    assert query_payload["metrics"]["vector_accelerated"] is False
+
+    status = run_cmd([sys.executable, "-m", "codeindex.cli", "--config", str(config), "status"], cwd=repo_root, env=env)
+    status_payload = json.loads(status.stdout)
+    assert status_payload["capabilities"]["vector"] == {
+        "backend": "python-cosine",
+        "accelerated": False,
+        "degraded": True,
+    }
+
+
+def test_memory_search_and_status_degrade_without_fts5(tmp_path: Path):
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "auth.py").write_text("def authenticate(token):\n    return token\n", encoding="utf-8")
+
+    config = tmp_path / "codeindex.yaml"
+    repo_root = Path(__file__).resolve().parents[1]
+    env = {"CODEINDEX_DISABLE_FTS5": "1"}
+
+    run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "init", "--path", str(project), "--workspace", "memfallback"],
+        cwd=repo_root,
+        env=env,
+    )
+    run_cmd([sys.executable, "-m", "codeindex.cli", "--config", str(config), "sync"], cwd=repo_root, env=env)
+    run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "query", "authenticate", "--workspace", "memfallback"],
+        cwd=repo_root,
+        env=env,
+    )
+
+    status = run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "memory", "status", "--workspace", "memfallback"],
+        cwd=repo_root,
+        env=env,
+    )
+    status_payload = json.loads(status.stdout)
+    assert status_payload["capabilities"]["memory_search_backend"] == "sql-like"
+    assert status_payload["capabilities"]["fts5_available"] is False
+    assert status_payload["capabilities"]["degraded"] is True
+
+    search = run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "memory", "search", "authenticate", "--workspace", "memfallback"],
+        cwd=repo_root,
+        env=env,
+    )
+    search_payload = json.loads(search.stdout)
+    assert search_payload["results"]

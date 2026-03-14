@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 import re
@@ -9,7 +10,7 @@ from typing import Any, Iterable
 from .memory_models import CapabilitySnapshot, MemoryCitation, MemoryObservation, MemorySearchHit, MemorySession
 
 
-MEMORY_SCHEMA = """
+BASE_MEMORY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_sessions (
   session_id TEXT PRIMARY KEY,
   workspace TEXT NOT NULL,
@@ -35,14 +36,6 @@ CREATE TABLE IF NOT EXISTS memory_observations (
   created_at TEXT NOT NULL,
   status TEXT NOT NULL,
   metadata_json TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS memory_observation_fts USING fts5(
-  observation_id UNINDEXED,
-  workspace UNINDEXED,
-  title,
-  body,
-  summary
 );
 
 CREATE TABLE IF NOT EXISTS memory_citations (
@@ -94,12 +87,24 @@ CREATE INDEX IF NOT EXISTS idx_memory_queue_state ON memory_queue(state, updated
 CREATE INDEX IF NOT EXISTS idx_memory_injection_workspace ON memory_injection_log(workspace, created_at);
 """
 
+FTS_MEMORY_SCHEMA = """
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_observation_fts USING fts5(
+  observation_id UNINDEXED,
+  workspace UNINDEXED,
+  title,
+  body,
+  summary
+);
+"""
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def fts5_available(conn: sqlite3.Connection) -> bool:
+    if os.getenv("CODEINDEX_DISABLE_FTS5", "").lower() in {"1", "true", "yes", "on"}:
+        return False
     try:
         conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS __memory_fts_probe USING fts5(value)")
         conn.execute("DROP TABLE IF EXISTS __memory_fts_probe")
@@ -111,7 +116,10 @@ def fts5_available(conn: sqlite3.Connection) -> bool:
 class MemoryStorage:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
-        self.conn.executescript(MEMORY_SCHEMA)
+        self.conn.executescript(BASE_MEMORY_SCHEMA)
+        self._fts5_enabled = fts5_available(conn)
+        if self._fts5_enabled:
+            self.conn.executescript(FTS_MEMORY_SCHEMA)
 
     def commit(self) -> None:
         self.conn.commit()
@@ -125,8 +133,10 @@ class MemoryStorage:
         return loaded if isinstance(loaded, dict) else {}
 
     def record_capability(self, snapshot: CapabilitySnapshot) -> None:
+        details = dict(snapshot.details)
+        details["memory_search_backend"] = self.search_backend_name()
         rows = [
-            ("fts5", int(snapshot.fts5_available), snapshot.checked_at, json.dumps(snapshot.details, sort_keys=True)),
+            ("fts5", int(snapshot.fts5_available), snapshot.checked_at, json.dumps(details, sort_keys=True)),
             ("yaml", int(snapshot.yaml_available), snapshot.checked_at, json.dumps(snapshot.details, sort_keys=True)),
         ]
         self.conn.executemany(
@@ -239,7 +249,7 @@ class MemoryStorage:
             "SELECT observation_id,workspace,title,body,summary FROM memory_observations WHERE observation_id=?",
             (observation_id,),
         ).fetchone()
-        if row:
+        if row and self._fts5_enabled:
             self.conn.execute("DELETE FROM memory_observation_fts WHERE observation_id=?", (observation_id,))
             self.conn.execute(
                 "INSERT INTO memory_observation_fts(observation_id,workspace,title,body,summary) VALUES(?,?,?,?,?)",
@@ -289,6 +299,8 @@ class MemoryStorage:
         terms = " ".join(part for part in re.findall(r"[A-Za-z0-9_]+", query_text) if part)
         if not terms:
             return []
+        if not self._fts5_enabled:
+            return self._search_observations_fallback(terms, workspace, limit, min_importance)
         rows = self.conn.execute(
             "SELECT o.observation_id,o.session_id,o.workspace,o.kind,o.source,o.title,o.body,o.summary,o.token_count,o.importance,o.created_at,o.status,o.metadata_json,"
             "c.citation_id, bm25(memory_observation_fts) AS rank "
@@ -300,6 +312,52 @@ class MemoryStorage:
             (terms, workspace, min_importance, limit),
         ).fetchall()
         return [self._row_to_hit(row, relevance=max(0.05, 1.0 / (1.0 + abs(float(row[14] or 0.0))))) for row in rows]
+
+    def _search_observations_fallback(
+        self,
+        terms: str,
+        workspace: str,
+        limit: int,
+        min_importance: float,
+    ) -> list[MemorySearchHit]:
+        term_list = [part.lower() for part in terms.split() if part]
+        if not term_list:
+            return []
+        filters: list[str] = []
+        params: list[Any] = [workspace, min_importance]
+        for term in term_list:
+            filters.append("(LOWER(o.title) LIKE ? OR LOWER(o.body) LIKE ? OR LOWER(o.summary) LIKE ?)")
+            like_term = f"%{term}%"
+            params.extend([like_term, like_term, like_term])
+        sql = (
+            "SELECT o.observation_id,o.session_id,o.workspace,o.kind,o.source,o.title,o.body,o.summary,o.token_count,"
+            "o.importance,o.created_at,o.status,o.metadata_json,c.citation_id "
+            "FROM memory_observations o "
+            "LEFT JOIN memory_citations c ON c.observation_id=o.observation_id "
+            "WHERE o.workspace=? AND o.status='processed' AND o.importance >= ? AND ("
+            + " OR ".join(filters)
+            + ")"
+        )
+        rows = self.conn.execute(sql, tuple(params)).fetchall()
+        scored: list[tuple[float, tuple[Any, ...]]] = []
+        for row in rows:
+            haystacks = {
+                "title": str(row[5]).lower(),
+                "body": str(row[6]).lower(),
+                "summary": str(row[7]).lower(),
+            }
+            score = 0.0
+            for term in term_list:
+                if term in haystacks["title"]:
+                    score += 3.0
+                if term in haystacks["summary"]:
+                    score += 2.0
+                if term in haystacks["body"]:
+                    score += 1.0
+            score += float(row[9]) * 0.1
+            scored.append((score, row))
+        scored.sort(key=lambda item: (item[0], str(item[1][10])), reverse=True)
+        return [self._row_to_hit(row, relevance=max(0.05, score / max(len(term_list) * 6.0, 1.0))) for score, row in scored[:limit]]
 
     def _row_to_hit(self, row: tuple[Any, ...], relevance: float) -> MemorySearchHit:
         observation = MemoryObservation(
@@ -449,15 +507,21 @@ class MemoryStorage:
         capabilities = self.conn.execute(
             "SELECT capability_name, available, checked_at FROM memory_capabilities ORDER BY capability_name ASC"
         ).fetchall()
+        capability_records = [
+            {"name": row[0], "available": bool(row[1]), "checked_at": row[2]}
+            for row in capabilities
+        ]
         return {
             "sessions": session_count,
             "observations": observation_count,
             "citations": citation_count,
             "queue": queue_counts,
-            "capabilities": [
-                {"name": row[0], "available": bool(row[1]), "checked_at": row[2]}
-                for row in capabilities
-            ],
+            "capabilities": {
+                "memory_search_backend": self.search_backend_name(),
+                "fts5_available": self._fts5_enabled,
+                "degraded": not self._fts5_enabled,
+                "records": capability_records,
+            },
         }
 
     def recent_stream_events(self, workspace: str, limit: int) -> list[dict[str, Any]]:
@@ -478,3 +542,6 @@ class MemoryStorage:
             }
             for row in rows
         ]
+
+    def search_backend_name(self) -> str:
+        return "fts5" if self._fts5_enabled else "sql-like"

@@ -1,7 +1,7 @@
 # Stack Evolution Research (Next Milestone)
 
 ## Goal
-Evolve CodeIndex Sync’s stack for security, reliability, and predictable local performance without breaking the local-first/SQLite-first model.
+Evolve CodeIndexï¿½s stack for security, reliability, and predictable local performance without breaking the local-first/SQLite-first model.
 
 ## Recommended Stack/Dependency Strategy
 - Keep Python modular monolith + SQLite as the core architecture for this milestone.

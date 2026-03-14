@@ -2,11 +2,11 @@
 
 ## Goal
 
-Integrate high-value capabilities inspired by `wrale/mcp-server-tree-sitter` into CodeIndex Sync without copying the upstream application.
+Integrate high-value capabilities inspired by `wrale/mcp-server-tree-sitter` into CodeIndex without copying the upstream application.
 
 ## Architecture
 
-- Keep CodeIndex Sync as the single runtime and package.
+- Keep CodeIndex as the single runtime and package.
 - Add a dedicated analysis domain module: `codeindex/analysis.py`.
 - Reuse the same config/project root/exclusion model already used by sync/query.
 - Expose features on both existing interfaces:

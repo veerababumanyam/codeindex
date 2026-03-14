@@ -1,4 +1,4 @@
-# Roadmap: CodeIndex Sync
+# Roadmap: CodeIndex
 
 **Created:** 2026-03-14
 **Source Requirements:** `.planning/REQUIREMENTS.md`
@@ -9,7 +9,7 @@
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
 | 1 | Security and Policy Foundation | Make service and analysis flows safe by default | SEC-01, SEC-02, SEC-03, SEC-04 | 4 |
-| 2 | Capability Resilience | Ensure optional feature availability does not break baseline behavior | CAP-01, CAP-02, CAP-03 | 4 |
+| 2 | Capability Resilience | Make fallback paths first-class so plain environments remain functional and predictable | CAP-01, CAP-02, CAP-03 | 4 |
 | 3 | Request-Path Performance | Reduce latency contention and decouple background work | PERF-01, PERF-02, PERF-03 | 4 |
 | 4 | Index and Retrieval Correctness | Improve sync reliability and fallback search quality | IDX-01, IDX-02, IDX-03 | 4 |
 | 5 | Contract Parity and Regression Net | Lock down interface consistency and high-risk regression coverage | API-01, API-02, QA-01 | 4 |
@@ -39,6 +39,8 @@
 2. Memory features run in a degraded but functional mode when FTS5 is absent.
 3. Capability mode is visible to users through status/health output.
 4. Capability-dependent behavior has tests for both accelerated and fallback modes.
+
+**Status:** Complete on 2026-03-14
 
 ### Phase 3: Request-Path Performance
 **Goal:** Remove avoidable hot-path work and stabilize latency under concurrency.
@@ -82,4 +84,4 @@
 Coverage is complete. Each v1 requirement maps to exactly one phase.
 
 ---
-*Last updated: 2026-03-14 after Phase 1 execution and validation*
+*Last updated: 2026-03-14 after Phase 2 execution and validation*

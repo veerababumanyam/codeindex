@@ -188,13 +188,3 @@ def is_loopback_host(host: str) -> bool:
         return ip_address(normalized).is_loopback
     except ValueError:
         return False
-
-
-def is_loopback_host(host: str) -> bool:
-    normalized = host.strip().lower()
-    if normalized == "localhost":
-        return True
-    try:
-        return ip_address(normalized).is_loopback
-    except ValueError:
-        return False

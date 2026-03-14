@@ -1,4 +1,4 @@
-# Requirements: CodeIndex Sync
+# Requirements: CodeIndex
 
 **Defined:** 2026-03-14
 **Core Value:** Developers can reliably find relevant code context fast, locally, and with predictable costs.
@@ -14,9 +14,9 @@
 
 ### Runtime Capability and Packaging
 
-- [ ] **CAP-01**: Fresh install works without sqlite vector extensions and still supports functional query fallback.
-- [ ] **CAP-02**: Memory subsystem degrades gracefully when FTS5 is unavailable.
-- [ ] **CAP-03**: Runtime exposes active capability mode (vector/fts/fallback) in status outputs.
+- [x] **CAP-01**: Fresh install works without sqlite vector extensions and still supports functional query fallback.
+- [x] **CAP-02**: Memory subsystem degrades gracefully when FTS5 is unavailable.
+- [x] **CAP-03**: Runtime exposes active capability mode (vector/fts/fallback) in status outputs.
 
 ### Performance and Concurrency
 
@@ -62,9 +62,9 @@
 | SEC-02 | Phase 1 | Complete |
 | SEC-03 | Phase 1 | Complete |
 | SEC-04 | Phase 1 | Complete |
-| CAP-01 | Phase 2 | Pending |
-| CAP-02 | Phase 2 | Pending |
-| CAP-03 | Phase 2 | Pending |
+| CAP-01 | Phase 2 | Complete |
+| CAP-02 | Phase 2 | Complete |
+| CAP-03 | Phase 2 | Complete |
 | PERF-01 | Phase 3 | Pending |
 | PERF-02 | Phase 3 | Pending |
 | PERF-03 | Phase 3 | Pending |
@@ -82,4 +82,4 @@
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after Phase 1 execution and validation*
+*Last updated: 2026-03-14 after Phase 2 execution and validation*

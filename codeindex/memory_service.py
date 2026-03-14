@@ -29,9 +29,6 @@ class MemoryContext:
     command_name: str
 
 
-_CAPABILITY_CACHE: CapabilitySnapshot | None = None
-
-
 class MemoryService:
     def __init__(self, storage, config: dict[str, Any], hook_registry: HookRegistry | None = None) -> None:
         self.storage = storage
@@ -46,17 +43,27 @@ class MemoryService:
         return bool(self._memory_cfg().get("enabled", False))
 
     def capabilities(self) -> CapabilitySnapshot:
-        global _CAPABILITY_CACHE
-        if _CAPABILITY_CACHE is None:
-            _CAPABILITY_CACHE = CapabilitySnapshot(
-                fts5_available=fts5_available(self.storage.conn),
-                yaml_available=yaml is not None,
-                checked_at=utc_now(),
-                details={"sqlite_version": self.storage.conn.execute("select sqlite_version()").fetchone()[0]},
-            )
-        self.memory.record_capability(_CAPABILITY_CACHE)
+        snapshot = CapabilitySnapshot(
+            fts5_available=fts5_available(self.storage.conn),
+            yaml_available=yaml is not None,
+            checked_at=utc_now(),
+            details={
+                "sqlite_version": self.storage.conn.execute("select sqlite_version()").fetchone()[0],
+                "memory_search_backend": self.memory.search_backend_name(),
+            },
+        )
+        self.memory.record_capability(snapshot)
         self.storage.commit()
-        return _CAPABILITY_CACHE
+        return snapshot
+
+    def capability_summary(self) -> dict[str, object]:
+        snapshot = self.capabilities()
+        return {
+            "memory_search_backend": self.memory.search_backend_name(),
+            "fts5_available": snapshot.fts5_available,
+            "yaml_available": snapshot.yaml_available,
+            "degraded": not snapshot.fts5_available,
+        }
 
     def start_session(self, workspace: str, project_root: Path, actor_surface: str, command_name: str, trigger_kind: str) -> MemoryContext:
         session = MemorySession(
@@ -202,8 +209,9 @@ class MemoryService:
         }
 
     def status(self, workspace: str) -> dict[str, Any]:
-        self.capabilities()
-        return self.memory.status(workspace)
+        payload = self.memory.status(workspace)
+        payload["capabilities"].update(self.capability_summary())
+        return payload
 
     def recent_stream_events(self, workspace: str, limit: int) -> list[dict[str, Any]]:
         return self.memory.recent_stream_events(workspace, limit=limit)

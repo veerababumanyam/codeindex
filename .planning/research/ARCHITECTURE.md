@@ -1,4 +1,4 @@
-# Architecture Research: Next Milestone (CodeIndex Sync)
+# Architecture Research: Next Milestone (CodeIndex)
 
 ## Recommended Component Boundaries
 

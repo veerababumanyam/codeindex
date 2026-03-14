@@ -1,4 +1,4 @@
-# Research Summary: CodeIndex Sync
+# Research Summary: CodeIndex
 
 **Date:** 2026-03-14
 **Project Context:** Brownfield hardening milestone for local-first semantic code indexing/search/analysis/memory tool.

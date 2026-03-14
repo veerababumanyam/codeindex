@@ -1,7 +1,7 @@
-# CodeIndex Sync Feature Research
+# CodeIndex Feature Research
 
 ## Goal
-Define practical feature scope for near-term requirements in the CodeIndex Sync domain (local-first indexing, retrieval, analysis, and memory across CLI/HTTP/MCP).
+Define practical feature scope for near-term requirements in the CodeIndex domain (local-first indexing, retrieval, analysis, and memory across CLI/HTTP/MCP).
 
 ## Table Stakes (Must-Have)
 - Reliable local indexing and sync: initial sync, incremental updates, deletion handling, and watch mode that does not silently miss common changes.

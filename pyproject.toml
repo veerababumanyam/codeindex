@@ -4,18 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codeindex-sync"
-version = "0.0.1"
+version = "0.0.2"
 description = "Local-first code indexing and semantic retrieval"
 requires-python = ">=3.10"
 dependencies = [
   "PyYAML>=6.0",
-  "sqlite-vec>=0.1.6",
-  "sqlite-vss>=0.1.2",
 ]
 
 [project.optional-dependencies]
 analysis = [
   "tree-sitter-languages>=1.10.2",
+]
+vectors = [
+  "sqlite-vec>=0.1.6",
+  "sqlite-vss>=0.1.2",
 ]
 
 [project.scripts]
@@ -23,3 +25,6 @@ codeindex = "codeindex.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["codeindex*"]
