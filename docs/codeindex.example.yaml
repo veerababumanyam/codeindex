@@ -1,0 +1,35 @@
+workspace: myapp
+
+paths:
+  project_root: /myproject
+  global_docs:
+    - /shared
+
+llm:
+  provider: ollama
+  model: llama3
+  embedding_model: nomic-embed
+  api_key_env: CODEINDEX_API_KEY
+
+indexing:
+  chunk_size: 800
+  chunk_overlap: 120
+  max_response_tokens: 2000
+  enable_ast_summaries: true
+  compression_target_ratio: 0.01
+
+watch:
+  enabled: true
+  debounce_ms: 250
+
+excludes:
+  - node_modules/**
+  - dist/**
+  - build/**
+  - .git/**
+  - .cache/**
+
+query:
+  top_k: 5
+  include_global_docs: true
+  require_workspace: true
