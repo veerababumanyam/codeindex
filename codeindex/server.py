@@ -377,7 +377,7 @@ class SearchHandler(BaseHTTPRequestHandler):
                         rpc_id,
                         result={
                             "protocolVersion": "2024-11-05",
-                            "serverInfo": {"name": "codeindex-sync", "version": "0.1.0"},
+                            "serverInfo": {"name": "codeindex-sync", "version": "0.0.1"},
                             "capabilities": {"tools": {}},
                         },
                     )
