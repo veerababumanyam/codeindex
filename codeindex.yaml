@@ -1,0 +1,51 @@
+workspace: veerababumanyam/codeindex
+paths:
+  project_root: C:\Users\admin\Desktop\CodeSync
+  global_docs: []
+server:
+  host: 127.0.0.1
+  port: 9090
+  allow_remote: false
+  auth_token: null
+  auth_token_header: X-CodeIndex-Token
+indexing:
+  chunk_size: 800
+  chunk_overlap: 120
+  max_response_tokens: 2000
+watch:
+  enabled: false
+  debounce_ms: 250
+excludes:
+- .git/**
+- node_modules/**
+- build/**
+- dist/**
+- .cache/**
+query:
+  top_k: 5
+  include_global_docs: true
+  require_workspace: true
+  mode: hybrid
+analysis:
+  prefer_tree_sitter: true
+memory:
+  enabled: true
+  auto_capture: true
+  inject_on_query: true
+  inject_on_analyze: true
+  inject_on_mcp: true
+  project_local_only: true
+  summary_budget_tokens: 600
+  expanded_budget_tokens: 1800
+  max_injected_observations: 8
+  min_importance: 0.2
+  worker:
+    enabled: true
+    poll_interval_ms: 500
+    max_batch_size: 20
+    max_retries: 3
+  viewer:
+    enabled: true
+    host: 127.0.0.1
+    port: 9090
+    stream_buffer_size: 200

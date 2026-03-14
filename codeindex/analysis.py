@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .indexer import TEXT_EXTS, extract_symbols
+from .storage import Storage
 
 try:
     from tree_sitter_languages import get_parser as ts_get_parser  # type: ignore
@@ -509,3 +510,74 @@ def project_stats(root: Path, excludes: list[str]) -> dict[str, Any]:
         "symbols": total_symbols,
         "languages": by_language,
     }
+
+
+def extract_graph_data(storage: Storage, workspace: str, root: Path, excludes: list[str]) -> dict[str, Any]:
+    nodes: list[dict[str, Any]] = []
+    links: list[dict[str, Any]] = []
+    seen_nodes: set[str] = set()
+
+    # 1. Fetch Files
+    files = iter_text_files(root, excludes)
+    for path in files:
+        rel = path.relative_to(root).as_posix()
+        node_id = f"file:{rel}"
+        if node_id not in seen_nodes:
+            nodes.append({"id": node_id, "label": rel, "kind": "file", "group": 1})
+            seen_nodes.add(node_id)
+
+        # 2. Extract Dependencies (Edges)
+        content = _read_text(path)
+        deps = []
+        if path.suffix.lower() == ".py":
+            deps = _python_dependencies(content)
+        elif path.suffix.lower() in {".js", ".jsx", ".ts", ".tsx"}:
+            deps = _js_dependencies(content)
+
+        for dep in deps:
+            # Simple heuristic for internal dependencies
+            dep_path = dep.replace(".", "/")
+            for ext in TEXT_EXTS:
+                candidate = dep_path + ext
+                if (root / candidate).exists():
+                    links.append({"source": node_id, "target": f"file:{candidate}", "kind": "dependency"})
+                    break
+
+    # 3. Fetch Symbols from Storage
+    cursor = storage.conn.execute(
+        "SELECT path, symbol_name FROM chunks WHERE workspace=? AND source_kind='symbol'",
+        (workspace,),
+    )
+    for path, symbol_name in cursor:
+        if not symbol_name:
+            continue
+        node_id = f"symbol:{path}:{symbol_name}"
+        if node_id not in seen_nodes:
+            nodes.append({"id": node_id, "label": symbol_name.split(":")[-1], "kind": "symbol", "group": 2})
+            seen_nodes.add(node_id)
+        links.append({"source": f"file:{path}", "target": node_id, "kind": "contains"})
+
+    # 4. Fetch Memory Observations
+    cursor = storage.conn.execute(
+        "SELECT observation_id, title, kind FROM memory_observations WHERE workspace=? AND status='processed'",
+        (workspace,),
+    )
+    for obs_id, title, kind in cursor:
+        node_id = f"obs:{obs_id}"
+        if node_id not in seen_nodes:
+            nodes.append({"id": node_id, "label": title, "kind": "observation", "group": 3, "subkind": kind})
+            seen_nodes.add(node_id)
+
+    # 5. Fetch Citations (Links between Observations and Files/Symbols)
+    cursor = storage.conn.execute(
+        "SELECT observation_id, snippet FROM memory_citations WHERE workspace=?",
+        (workspace,),
+    )
+    for obs_id, snippet in cursor:
+        # Heuristic: Find mentioned files or symbols in snippet
+        # This is basic; in a real app, we'd have better structured linking
+        for node in nodes:
+            if node["kind"] in ("file", "symbol") and node["label"] in snippet:
+                links.append({"source": f"obs:{obs_id}", "target": node["id"], "kind": "cites"})
+
+    return {"nodes": nodes, "links": links}

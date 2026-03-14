@@ -6,7 +6,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.0.2-orange.svg)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.0.3-orange.svg)](pyproject.toml)
 [![Architecture](https://img.shields.io/badge/arch-Local--First-purple.svg)](#architecture)
 
 **CodeIndex** is like a "Search Engine & Memory" for your software code. It lives entirely on your own computer, keeping your data private while making your code understandable for AI tools.
@@ -61,9 +61,14 @@ Go beyond simple grep. Use the integrated analysis engine to query:
 
 ### 💾 Persistent Project Memory
 The `memory_*` subsystem records your development journey.
-- **Auto-Capture**: Every query and analysis is logged as a discrete "observation".
-- **Progressive Disclosure**: View summaries of past interactions or expand them into full citations.
 - **Session Tracking**: Organize work into coherent sessions for long-running feature implementations.
+
+### 🗺️ Cognitive Code Map (Visualizer)
+The `viewer` subsystem provides a rich, interactive dashboard for your codebase.
+- **Force-Directed Graph**: Visualize the relationships between files, symbols, and citations.
+- **Semantic Playground**: Test your RAG queries in real-time and see exactly which parts of your code are being referenced.
+- **Real-time Activity**: Monitor background indexing and memory capture via a live event stream.
+
 
 ---
 
@@ -188,16 +193,14 @@ pytest
 
 ## 🗺️ Roadmap
 
-- [ ] **Filesystem Events**: Transition from polling to native `watchdog` events.
-- [ ] **Multi-Language AST**: Broader support for JS/TS/Go via `tree-sitter`.
-- [ ] **Web UI**: A unified dashboard for browsing the Index and Memory layers.
+- [x] **Web UI**: A unified dashboard for browsing the Index and Memory layers (Completed in v0.0.3).
 - [ ] **Context Pruning**: AI-driven importance scoring for memory entries.
+
 
 ---
 
-## ⚖️ License
+CodeIndex is released under the [MIT License](LICENSE).
 
-No license file is currently present. Defaulting to **All Rights Reserved** for now. Please add an `MIT` or `Apache-2.0` license before distributing publicly.
 
 ---
 <p align="center">

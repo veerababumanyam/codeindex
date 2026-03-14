@@ -11,6 +11,7 @@ from .config import is_loopback_host
 from .analysis import (
     analyze_complexity,
     analyze_dependencies,
+    extract_graph_data,
     find_symbol_usage,
     list_project_files,
     list_symbols,
@@ -65,7 +66,7 @@ class SearchHandler(BaseHTTPRequestHandler):
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["files", "symbols", "ast", "validate", "dependencies", "complexity", "usage", "stats"],
+                        "enum": ["files", "symbols", "ast", "validate", "dependencies", "complexity", "usage", "stats", "graph"],
                     },
                     "root": {"type": "string"},
                     "path": {"type": "string"},
@@ -225,6 +226,10 @@ class SearchHandler(BaseHTTPRequestHandler):
             return find_symbol_usage(root, self.excludes, symbol=symbol, limit=limit)
         if kind == "stats":
             return project_stats(root, self.excludes)
+        if kind == "graph":
+            with Storage(self.db_path) as storage:
+                workspace = str(self.config_data.get("workspace", "default"))
+                return extract_graph_data(storage, workspace, root, self.excludes)
         raise ValueError(f"Unknown analysis kind: {kind}")
 
     def _memory_payload(self, memory_service: MemoryService, params: dict[str, list[str]], path: str) -> dict:
