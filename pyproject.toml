@@ -7,6 +7,16 @@ name = "codeindex-sync"
 version = "0.1.0"
 description = "Local-first code indexing and semantic retrieval"
 requires-python = ">=3.10"
+dependencies = [
+  "PyYAML>=6.0",
+  "sqlite-vec>=0.1.6",
+  "sqlite-vss>=0.1.2",
+]
+
+[project.optional-dependencies]
+analysis = [
+  "tree-sitter-languages>=1.10.2",
+]
 
 [project.scripts]
 codeindex = "codeindex.cli:main"
