@@ -4,7 +4,7 @@ import ast
 import fnmatch
 import re
 from collections import Counter
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .indexer import TEXT_EXTS, extract_symbols
@@ -76,10 +76,33 @@ def _read_text(path: Path) -> str:
     return raw.decode("utf-8-sig", errors="ignore")
 
 
+def _ensure_within_root(root: Path, target: Path, label: str) -> None:
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"{label} escapes the configured project root") from exc
+
+
+def validate_relative_path(rel_path: str) -> str:
+    normalized = rel_path.replace("\\", "/").strip()
+    if not normalized:
+        raise ValueError("path is required")
+    if Path(normalized).is_absolute():
+        raise ValueError(f"{rel_path} escapes the configured project root")
+    pure = PurePosixPath(normalized)
+    if pure.is_absolute():
+        raise ValueError(f"{rel_path} escapes the configured project root")
+    if any(part == ".." for part in pure.parts):
+        raise ValueError(f"{rel_path} escapes the configured project root")
+    return pure.as_posix()
+
+
 def _resolve_file(root: Path, rel_path: str) -> Path:
-    target = (root / rel_path).resolve()
+    safe_rel_path = validate_relative_path(rel_path)
+    target = (root / safe_rel_path).resolve()
+    _ensure_within_root(root.resolve(), target, safe_rel_path)
     if not target.exists() or not target.is_file():
-        raise ValueError(f"Path not found: {rel_path}")
+        raise ValueError(f"Path not found: {safe_rel_path}")
     return target
 
 

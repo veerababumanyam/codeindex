@@ -208,6 +208,41 @@ def test_load_config_requires_pyyaml_when_config_exists(tmp_path: Path, monkeypa
         config_module.load_config(config)
 
 
+def test_server_config_defaults_and_validation():
+    loaded = config_module.validate_config(config_module._default_config_copy())
+    assert loaded["server"]["host"] == "127.0.0.1"
+    assert loaded["server"]["allow_remote"] is False
+    assert loaded["server"]["auth_token"] is None
+
+    invalid = config_module._default_config_copy()
+    invalid["server"]["auth_token_header"] = ""
+    with pytest.raises(ValueError, match="server.auth_token_header"):
+        config_module.validate_config(invalid)
+
+    invalid = config_module._default_config_copy()
+    invalid["server"]["auth_token"] = 123
+    with pytest.raises(ValueError, match="server.auth_token"):
+        config_module.validate_config(invalid)
+
+
+def test_config_command_updates_server_allow_remote(tmp_path: Path):
+    config = tmp_path / "codeindex.yaml"
+    repo_root = Path(__file__).resolve().parents[1]
+
+    run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "init", "--path", str(tmp_path), "--workspace", "demo"],
+        cwd=repo_root,
+    )
+    result = run_cmd(
+        [sys.executable, "-m", "codeindex.cli", "--config", str(config), "config", "server.allow_remote", "true"],
+        cwd=repo_root,
+    )
+
+    assert "Updated server.allow_remote" in result.stdout
+    loaded = config_module.load_config(config)
+    assert loaded.data["server"]["allow_remote"] is True
+
+
 def test_binaryish_files_do_not_break_sync(tmp_path: Path):
     project = tmp_path / "proj"
     project.mkdir()

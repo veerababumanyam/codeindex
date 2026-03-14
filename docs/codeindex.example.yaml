@@ -5,6 +5,13 @@ paths:
   global_docs:
     - /shared
 
+server:
+  host: 127.0.0.1
+  port: 9090
+  allow_remote: false
+  auth_token: null
+  auth_token_header: X-CodeIndex-Token
+
 llm:
   provider: ollama
   model: llama3
@@ -37,6 +44,13 @@ query:
 
 analysis:
   prefer_tree_sitter: true
+
+server:
+  host: 127.0.0.1
+  port: 9090
+  allow_remote: false
+  auth_token: null
+  auth_token_header: X-CodeIndex-Token
 
 memory:
   enabled: true

@@ -106,6 +106,20 @@ Run continuous sync:
 codeindex sync --watch --interval 2
 ```
 
+Serve locally by default:
+
+```bash
+codeindex serve
+```
+
+Remote binds require an explicit opt-in:
+
+```bash
+codeindex serve --host 0.0.0.0 --port 9090 --allow-remote
+```
+
+To protect HTTP and MCP routes, set `server.auth_token` in `codeindex.yaml` or pass `--auth-token` and send the same value in the `X-CodeIndex-Token` header.
+
 ## CLI Commands
 
 ### Project + Search
@@ -144,6 +158,16 @@ Start server:
 ```bash
 codeindex serve --host 127.0.0.1 --port 9090
 ```
+
+By default the server only allows loopback hosts (`127.0.0.1`, `localhost`, `::1`). Binding to a non-loopback address such as `0.0.0.0` fails unless `server.allow_remote: true` or `--allow-remote` is supplied intentionally.
+
+Remote exposure is loopback-only by default. Binding to `0.0.0.0`, a LAN IP, or any non-loopback host requires an explicit opt-in:
+
+```bash
+codeindex serve --host 0.0.0.0 --port 9090 --allow-remote
+```
+
+Optional API token protection applies to both HTTP and MCP routes. Set `server.auth_token` in `codeindex.yaml` or pass `--auth-token` when starting the server, then include that value in the `X-CodeIndex-Token` header on each request.
 
 Main endpoints:
 
@@ -199,10 +223,19 @@ Key sections:
 - `workspace`
 - `paths.project_root`
 - `paths.global_docs`
+- `server.host`
+- `server.port`
+- `server.allow_remote`
+- `server.auth_token`
 - `indexing.*`
 - `excludes`
 - `query.*`
 - `analysis.prefer_tree_sitter`
+- `server.host`
+- `server.port`
+- `server.allow_remote`
+- `server.auth_token`
+- `server.auth_token_header`
 - `memory.*`
 
 ## SEO/GEO Notes for GitHub Discoverability

@@ -20,7 +20,7 @@ from .config import DEFAULT_CONFIG, load_config, save_config, set_config_value
 from .indexer import sync_workspace
 from .memory_service import MemoryContext, MemoryService
 from .search import search_index
-from .server import serve
+from .server import serve, validate_bind_host
 from .storage import Storage
 
 
@@ -267,17 +267,27 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_serve(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
     database_path = db_path(Path(args.config).parent.resolve())
+    server_cfg = loaded.data["server"]
+    host = args.host or str(server_cfg["host"])
+    port = args.port or int(server_cfg["port"])
+    allow_remote = bool(args.allow_remote or server_cfg.get("allow_remote", False))
+    auth_token = args.auth_token if args.auth_token is not None else server_cfg.get("auth_token")
+    auth_token_header = str(server_cfg.get("auth_token_header", "X-CodeIndex-Token"))
     with Storage(database_path):
         pass
-    print(f"Serving on {args.host}:{args.port}")
+    validate_bind_host(host, allow_remote)
+    print(f"Serving on {host}:{port}")
     serve(
         db_path=database_path,
-        host=args.host,
-        port=args.port,
+        host=host,
+        port=port,
         default_root=Path(loaded.data["paths"]["project_root"]).resolve(),
         excludes=list(loaded.data.get("excludes", [])),
         prefer_tree_sitter=bool(loaded.data.get("analysis", {}).get("prefer_tree_sitter", True)),
         config_data=loaded.data,
+        allow_remote=allow_remote,
+        auth_token=str(auth_token) if auth_token is not None else None,
+        auth_token_header=auth_token_header,
     )
     return 0
 
@@ -451,11 +461,16 @@ def cmd_memory_citations(args: argparse.Namespace) -> int:
 def cmd_memory_viewer(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
     viewer_cfg = loaded.data["memory"]["viewer"]
+    server_cfg = loaded.data["server"]
     host = args.host or viewer_cfg["host"]
     port = args.port or int(viewer_cfg["port"])
+    allow_remote = bool(args.allow_remote or server_cfg.get("allow_remote", False))
+    auth_token = args.auth_token if args.auth_token is not None else server_cfg.get("auth_token")
+    auth_token_header = str(server_cfg.get("auth_token_header", "X-CodeIndex-Token"))
     database_path = db_path(Path(args.config).parent.resolve())
     with Storage(database_path):
         pass
+    validate_bind_host(host, allow_remote)
     print(f"Serving memory viewer on {host}:{port}")
     serve(
         db_path=database_path,
@@ -465,7 +480,11 @@ def cmd_memory_viewer(args: argparse.Namespace) -> int:
         excludes=list(loaded.data.get("excludes", [])),
         prefer_tree_sitter=bool(loaded.data.get("analysis", {}).get("prefer_tree_sitter", True)),
         config_data=loaded.data,
+        allow_remote=allow_remote,
+        auth_token=str(auth_token) if auth_token is not None else None,
+        auth_token_header=auth_token_header,
     )
+    return 0
     return 0
 
 
@@ -504,8 +523,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(func=cmd_status)
 
     p_serve = sp.add_parser("serve")
-    p_serve.add_argument("--host", default="127.0.0.1")
-    p_serve.add_argument("--port", type=int, default=9090)
+    p_serve.add_argument("--host")
+    p_serve.add_argument("--port", type=int)
+    p_serve.add_argument("--allow-remote", action="store_true")
+    p_serve.add_argument("--auth-token")
     p_serve.set_defaults(func=cmd_serve)
 
     p_analyze = sp.add_parser("analyze")
@@ -557,6 +578,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_memory_viewer = memory_sp.add_parser("viewer")
     p_memory_viewer.add_argument("--host")
     p_memory_viewer.add_argument("--port", type=int)
+    p_memory_viewer.add_argument("--allow-remote", action="store_true")
+    p_memory_viewer.add_argument("--auth-token")
     p_memory_viewer.set_defaults(func=cmd_memory_viewer)
 
     return p

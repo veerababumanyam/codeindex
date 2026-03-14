@@ -7,10 +7,10 @@
 
 ### Security and Policy
 
-- [ ] **SEC-01**: HTTP server binds to loopback by default and requires explicit opt-in for remote exposure.
-- [ ] **SEC-02**: Remote HTTP/MCP access can be protected with an API token check.
-- [ ] **SEC-03**: Analysis file access is constrained to canonical workspace/project boundaries.
-- [ ] **SEC-04**: Memory viewer renders untrusted content safely without script execution.
+- [x] **SEC-01**: HTTP server binds to loopback by default and requires explicit opt-in for remote exposure.
+- [x] **SEC-02**: Remote HTTP/MCP access can be protected with an API token check.
+- [x] **SEC-03**: Analysis file access is constrained to canonical workspace/project boundaries.
+- [x] **SEC-04**: Memory viewer renders untrusted content safely without script execution.
 
 ### Runtime Capability and Packaging
 
@@ -58,10 +58,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SEC-01 | Phase 1 | Pending |
-| SEC-02 | Phase 1 | Pending |
-| SEC-03 | Phase 1 | Pending |
-| SEC-04 | Phase 1 | Pending |
+| SEC-01 | Phase 1 | Complete |
+| SEC-02 | Phase 1 | Complete |
+| SEC-03 | Phase 1 | Complete |
+| SEC-04 | Phase 1 | Complete |
 | CAP-01 | Phase 2 | Pending |
 | CAP-02 | Phase 2 | Pending |
 | CAP-03 | Phase 2 | Pending |
@@ -82,4 +82,4 @@
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after initial definition*
+*Last updated: 2026-03-14 after Phase 1 execution and validation*

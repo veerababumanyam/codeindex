@@ -27,6 +27,8 @@
 3. Analysis requests outside allowed workspace/project roots are blocked with clear errors.
 4. Memory viewer safely renders stored content without executable injection vectors.
 
+**Status:** Complete on 2026-03-14
+
 ### Phase 2: Capability Resilience
 **Goal:** Make fallback paths first-class so plain environments remain functional and predictable.
 
@@ -80,4 +82,4 @@
 Coverage is complete. Each v1 requirement maps to exactly one phase.
 
 ---
-*Last updated: 2026-03-14 after roadmap creation*
+*Last updated: 2026-03-14 after Phase 1 execution and validation*

@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from secrets import compare_digest
 from urllib.parse import parse_qs, urlparse
 
+from .analysis import validate_relative_path
+from .config import is_loopback_host
 from .analysis import (
     analyze_complexity,
     analyze_dependencies,
@@ -21,12 +24,22 @@ from .search import search_index
 from .storage import Storage
 
 
+def validate_bind_host(host: str, allow_remote: bool) -> None:
+    if not allow_remote and not is_loopback_host(host):
+        raise ValueError(
+            f"Refusing to bind to non-loopback host '{host}' without explicit remote opt-in. "
+            "Set server.allow_remote: true or pass --allow-remote."
+        )
+
+
 class SearchHandler(BaseHTTPRequestHandler):
     db_path: Path
     default_root: Path
     excludes: list[str]
     prefer_tree_sitter: bool
     config_data: dict[str, object]
+    auth_token: str | None
+    auth_token_header: str
 
     MCP_TOOLS = [
         {
@@ -124,6 +137,19 @@ class SearchHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _unauthorized(self) -> None:
+        body = json.dumps(
+            {
+                "error": "Unauthorized",
+                "message": f"Provide the configured API token in the {self.auth_token_header} header.",
+            }
+        ).encode("utf-8")
+        self.send_response(401)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _sse_response(self, body: bytes) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -143,15 +169,30 @@ class SearchHandler(BaseHTTPRequestHandler):
     def _workspace(self, params: dict[str, list[str]]) -> str:
         return params.get("workspace", [str(self.config_data.get("workspace", "default"))])[0]
 
-    def _resolve_root(self, params: dict[str, list[str]]) -> Path:
-        raw = params.get("root", [str(self.default_root)])[0]
-        return Path(raw).resolve()
+    def _requires_auth(self, path: str) -> bool:
+        return path == "/search" or path == "/mcp" or path.startswith("/analysis/") or path.startswith("/memory/")
+
+    def _authorized(self) -> bool:
+        if not self.auth_token:
+            return True
+        provided = self.headers.get(self.auth_token_header)
+        return isinstance(provided, str) and compare_digest(provided, self.auth_token)
+
+    def _trusted_analysis_root(self, params: dict[str, object]) -> Path:
+        raw_root = params.get("root")
+        if raw_root is not None:
+            candidate = Path(str(raw_root)).resolve()
+            if candidate != self.default_root:
+                raise ValueError("root overrides are not allowed for server analysis")
+        return self.default_root
 
     def _analysis_payload(self, kind: str, params: dict[str, object]) -> dict:
-        root_raw = params.get("root", str(self.default_root))
-        root = Path(str(root_raw)).resolve()
+        root = self._trusted_analysis_root(params)
         limit = max(1, int(params.get("limit", 50)))
-        rel_path = str(params.get("path", "")) if params.get("path") is not None else ""
+        rel_path = ""
+        raw_path = params.get("path")
+        if isinstance(raw_path, str) and raw_path.strip():
+            rel_path = validate_relative_path(raw_path)
         symbol = str(params.get("symbol", "")) if params.get("symbol") is not None else ""
         node_type = str(params.get("node_type")) if params.get("node_type") is not None else None
         name_contains = str(params.get("name_contains")) if params.get("name_contains") is not None else None
@@ -213,6 +254,9 @@ class SearchHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
         workspace = self._workspace(params)
+        if self._requires_auth(parsed.path) and not self._authorized():
+            self._unauthorized()
+            return
 
         try:
             with Storage(self.db_path) as storage:
@@ -282,8 +326,8 @@ class SearchHandler(BaseHTTPRequestHandler):
                 if parsed.path.startswith("/analysis/"):
                     kind = parsed.path.split("/")[-1]
                     raw_params: dict[str, object] = {
-                        "root": params.get("root", [str(self.default_root)])[0],
-                        "path": params.get("path", [""])[0],
+                        "root": params.get("root", [None])[0],
+                        "path": params.get("path", [None])[0],
                         "symbol": params.get("symbol", [""])[0],
                         "node_type": params.get("node_type", [None])[0],
                         "name_contains": params.get("name_contains", [None])[0],
@@ -342,6 +386,9 @@ class SearchHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if self.path != "/mcp":
             self.send_error(404, "Not Found")
+            return
+        if self._requires_auth(self.path) and not self._authorized():
+            self._unauthorized()
             return
 
         try:
@@ -488,7 +535,12 @@ def serve(
     excludes: list[str],
     prefer_tree_sitter: bool,
     config_data: dict[str, object],
+    allow_remote: bool = False,
+    auth_token: str | None = None,
+    auth_token_header: str = "X-CodeIndex-Token",
 ) -> None:
+    validate_bind_host(host, allow_remote)
+
     class Handler(SearchHandler):
         pass
 
@@ -497,6 +549,8 @@ def serve(
     Handler.excludes = excludes
     Handler.prefer_tree_sitter = prefer_tree_sitter
     Handler.config_data = config_data
+    Handler.auth_token = auth_token.strip() if isinstance(auth_token, str) else None
+    Handler.auth_token_header = auth_token_header
     server = ThreadingHTTPServer((host, port), Handler)
     try:
         server.serve_forever()

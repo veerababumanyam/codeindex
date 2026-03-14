@@ -54,12 +54,23 @@ def render_viewer_page(workspace: str) -> bytes:
     const workspace = {json.dumps(workspace)};
     const eventsEl = document.getElementById('events');
     const searchResultsEl = document.getElementById('searchResults');
+    function appendText(parent, tagName, className, value) {{
+      const el = document.createElement(tagName);
+      if (className) el.className = className;
+      el.textContent = value || '';
+      parent.appendChild(el);
+    }}
     function renderCard(target, item) {{
       const el = document.createElement('div');
       el.className = 'event';
-      el.innerHTML = `<strong>${{item.title || item.kind || item.observation_id}}</strong>
-        <div class="meta">${{item.created_at || ''}} ${{item.citation_id ? '| ' + item.citation_id : ''}}</div>
-        <div>${{item.summary || item.snippet || ''}}</div>`;
+      appendText(el, 'strong', '', item.title || item.kind || item.observation_id || '');
+      appendText(
+        el,
+        'div',
+        'meta',
+        `${{item.created_at || ''}}${{item.citation_id ? ' | ' + item.citation_id : ''}}`
+      );
+      appendText(el, 'div', '', item.summary || item.snippet || '');
       target.prepend(el);
     }}
     async function loadSearch() {{

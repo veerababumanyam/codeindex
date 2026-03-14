@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,13 @@ else:
 DEFAULT_CONFIG = {
     "workspace": "default",
     "paths": {"project_root": ".", "global_docs": []},
+    "server": {
+        "host": "127.0.0.1",
+        "port": 9090,
+        "allow_remote": False,
+        "auth_token": None,
+        "auth_token_header": "X-CodeIndex-Token",
+    },
     "indexing": {
         "chunk_size": 800,
         "chunk_overlap": 120,
@@ -83,6 +91,24 @@ def validate_config(data: dict[str, Any]) -> dict[str, Any]:
     for item in _expect_list(paths.get("global_docs"), "paths.global_docs"):
         if not isinstance(item, str):
             raise ValueError("Config key 'paths.global_docs' must contain only strings")
+
+    server = _expect_mapping(data.get("server"), "server")
+    host = server.get("host")
+    if not isinstance(host, str) or not host.strip():
+        raise ValueError("Config key 'server.host' must be a non-empty string")
+    if not isinstance(server.get("port"), int) or int(server["port"]) <= 0:
+        raise ValueError("Config key 'server.port' must be a positive integer")
+    if not isinstance(server.get("allow_remote"), bool):
+        raise ValueError("Config key 'server.allow_remote' must be a boolean")
+    auth_token = server.get("auth_token")
+    if auth_token is not None:
+        if not isinstance(auth_token, str):
+            raise ValueError("Config key 'server.auth_token' must be a string or null")
+        if not auth_token.strip():
+            raise ValueError("Config key 'server.auth_token' must not be empty when provided")
+    auth_token_header = server.get("auth_token_header")
+    if not isinstance(auth_token_header, str) or not auth_token_header.strip():
+        raise ValueError("Config key 'server.auth_token_header' must be a non-empty string")
 
     indexing = _expect_mapping(data.get("indexing"), "indexing")
     for key in ("chunk_size", "chunk_overlap", "max_response_tokens"):
@@ -152,3 +178,23 @@ def set_config_value(data: dict[str, Any], dotted_key: str, value: Any) -> None:
         raise KeyError(f"Unknown config key '{dotted_key}'")
     cur[keys[-1]] = value
     validate_config(data)
+
+
+def is_loopback_host(host: str) -> bool:
+    normalized = host.strip().lower()
+    if normalized in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def is_loopback_host(host: str) -> bool:
+    normalized = host.strip().lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
