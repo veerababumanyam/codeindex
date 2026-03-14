@@ -1,71 +1,51 @@
-# Codebase Conventions
+﻿# Repository Conventions
 
-## Scope
-
-This repository is a small Python CLI and HTTP service package centered on `codeindex/` with tests in `tests/`. The dominant conventions are simple stdlib-first implementation, typed public functions, dataclass-based value objects, and JSON-oriented CLI/API outputs.
+## Scope and Sources
+- This document reflects conventions observed in `codeindex/` and usage in `tests/`.
+- Primary entry points are `codeindex/cli.py` (CLI), `codeindex/server.py` (HTTP + MCP), and `codeindex/indexer.py` (indexing flow).
 
 ## Style
-
-- Files in `codeindex/` use `from __future__ import annotations` consistently.
-- Imports are grouped as: stdlib first, then local package imports. This pattern appears in `codeindex/cli.py`, `codeindex/config.py`, `codeindex/server.py`, `codeindex/storage.py`, `codeindex/indexer.py`, `codeindex/search.py`, and `codeindex/embedding.py`.
-- Functions are short and procedural. Most modules keep logic at module scope rather than introducing extra classes.
-- Type hints are used broadly on public functions and dataclass fields. Examples: `codeindex/cli.py`, `codeindex/config.py`, `codeindex/search.py`, and `codeindex/storage.py`.
-- Dataclasses are the primary structured-data pattern for in-memory models: `LoadedConfig` in `codeindex/config.py`, `ChunkRecord` in `codeindex/storage.py`, `SyncStats` in `codeindex/indexer.py`, and `SearchResult` in `codeindex/search.py`.
-- Comments are sparse and usually reserved for clarifying non-obvious behavior, such as the YAML fallback comment in `codeindex/config.py`.
-- String formatting uses f-strings throughout.
+- Language target is Python 3.10+ with modern typing (`dict[str, Any]`, `str | None`) across files like `codeindex/cli.py` and `codeindex/memory_service.py`.
+- Use `from __future__ import annotations` consistently (present in core modules such as `codeindex/storage.py`, `codeindex/search.py`, `codeindex/config.py`).
+- Prefer small helper functions for repeated logic, e.g. `_start_memory_context` and `_finish_memory_context` in `codeindex/cli.py`.
+- Keep JSON output machine-readable via explicit payload dicts and one print boundary (`_json_print` in `codeindex/cli.py`).
+- Keep module-level constants uppercase and explicit (`DEFAULT_CONFIG` in `codeindex/config.py`, `MODE_TO_KINDS` in `codeindex/search.py`, `TEXT_EXTS` in `codeindex/indexer.py`).
 
 ## Naming
+- Functions and variables: `snake_case` (`sync_workspace`, `extract_python_symbols`, `validate_mode`).
+- Dataclasses: `PascalCase` nouns for structured records (`SyncStats`, `ChunkRecord`, `MemoryContext`, `SearchResult`).
+- Internal-only helpers: leading underscore (`_analysis_payload`, `_memory_cfg`, `_deep_merge`).
+- CLI subcommands map 1:1 to `cmd_*` handlers in `codeindex/cli.py`.
+- Query/analyze "kind" strings are normalized as lower-case enums (`chunks|symbols|hybrid`, `ast|validate|...`) in `codeindex/search.py`, `codeindex/cli.py`, and `codeindex/server.py`.
 
-- Module names are lowercase nouns or verbs: `config.py`, `storage.py`, `search.py`, `indexer.py`, `embedding.py`, `server.py`, `cli.py`.
-- Public function names are snake_case and descriptive: `load_config`, `save_config`, `search_index`, `sync_workspace`, `chunk_text`.
-- Internal helpers are marked with a leading underscore: `_run_sync_once`, `_deep_merge`, `_default_config_copy`, `_parse_scalar`, `_parse_simple_yaml`, `_to_simple_yaml`, `_build_record`, `_migrate_schema`.
-- Constants are uppercase: `DEFAULT_CONFIG`, `SCHEMA`, `TEXT_EXTS`, `SYMBOL_PATTERNS`, `MODE_TO_KINDS`, `TOKEN_RE`.
-- CLI command handlers follow the `cmd_<subcommand>` pattern in `codeindex/cli.py`: `cmd_init`, `cmd_config`, `cmd_sync`, `cmd_query`, `cmd_status`, `cmd_serve`.
-- Tests follow `test_<behavior>` naming in `tests/test_cli.py` and `tests/test_server.py`.
-
-## Module Patterns
-
-- `codeindex/cli.py` is the orchestration layer. It parses args, loads config, instantiates `Storage`, calls core functions, prints JSON or human-readable status, and returns integer exit codes.
-- `codeindex/config.py` owns config defaults, load/save behavior, and dotted-path mutation. It also contains a fallback YAML parser/writer when `yaml` is unavailable.
-- `codeindex/storage.py` is the persistence boundary. It encapsulates SQLite schema creation, lightweight migrations, CRUD helpers, counts, and transaction commits.
-- `codeindex/indexer.py` handles filesystem traversal, exclusion filtering, chunking, symbol extraction, hashing, and incremental sync bookkeeping.
-- `codeindex/search.py` is a pure scoring layer over stored chunks. It resolves workspace scope, computes scores, and derives retrieval metrics.
-- `codeindex/server.py` is intentionally thin. It adapts query parameters from `BaseHTTPRequestHandler` to `search_index`.
-- `codeindex/embedding.py` is a pure utility module with deterministic local embedding and chunking helpers.
+## Design Patterns
+- Layered architecture:
+- IO surfaces in `codeindex/cli.py` and `codeindex/server.py`.
+- Domain logic in `codeindex/search.py`, `codeindex/indexer.py`, `codeindex/analysis.py`, `codeindex/memory_service.py`.
+- Persistence in `codeindex/storage.py` and `codeindex/memory_storage.py`.
+- Resource lifecycle uses context managers for DB safety (`with Storage(...) as storage:` in CLI/server).
+- Capability fallback pattern is explicit:
+- Optional imports guarded with `try/except` in `codeindex/storage.py`, `codeindex/analysis.py`, `codeindex/config.py`.
+- Runtime fallback order is deterministic (`sqlite-vec` -> `sqlite-vss` -> `python-cosine`) in `codeindex/storage.py`.
+- Response shaping is consistent: user-facing payloads include explicit `metrics`, `results`, and optional `memory` blocks in `codeindex/cli.py` and `codeindex/server.py`.
 
 ## Error Handling
+- Validate early and fail with typed exceptions (`ValueError`, `KeyError`, `RuntimeError`) in `codeindex/config.py`, `codeindex/search.py`, `codeindex/server.py`.
+- Boundary layers translate exceptions to user-safe outputs:
+- CLI: `main()` catches `(RuntimeError, ValueError)` and returns exit code `1` in `codeindex/cli.py`.
+- HTTP: `do_GET` returns 400 for `ValueError`; JSON-RPC maps errors to protocol codes in `codeindex/server.py`.
+- Keep defensive `except Exception` only for optional capability detection or guarded shutdown paths (see comments in `codeindex/storage.py`, `codeindex/analysis.py`, `codeindex/server.py`).
+- Config validation should include precise key paths in error text (pattern used heavily in `codeindex/config.py` and `codeindex/memory_config.py`).
 
-- CLI-facing validation typically returns status code `1` and prints a plain message instead of raising custom exceptions. Examples: `cmd_init` and `cmd_query` in `codeindex/cli.py`.
-- HTTP validation uses `self.send_error(...)` with `400` or `404` in `codeindex/server.py`.
-- Lower-level utility functions raise `ValueError` on invalid input, for example `chunk_text` in `codeindex/embedding.py` and `cosine_similarity` in `codeindex/embedding.py`.
-- Syntax failures while extracting Python symbols are treated as non-fatal and collapse to an empty list in `extract_python_symbols` in `codeindex/indexer.py`.
-- Config loading tolerates absent files by returning defaults in `load_config` in `codeindex/config.py`.
-- Optional dependency handling is permissive: `codeindex/config.py` catches any exception while importing `yaml` and falls back to a minimal internal parser.
+## Logging and Observability
+- Traditional `logging` module is currently not used; CLI-visible output is via `print(...)` in `codeindex/cli.py`.
+- Structured observability is implemented through persistent memory events rather than log sinks:
+- Session/event capture in `codeindex/memory_service.py` (`start_session`, `capture_event`, `run_worker_once`, `end_session`).
+- Stream/view surfaces in `codeindex/server.py` (`/memory/stream`, `/memory/viewer`).
+- Conventions for new diagnostics:
+- Prefer adding structured fields to event metadata in `codeindex/memory_service.py` call sites.
+- Keep stdout focused on command results and operator messages (e.g. watch mode notices in `codeindex/cli.py`).
 
-## CLI And API Conventions
-
-- CLI entrypoint is the `codeindex` console script defined in `pyproject.toml` and implemented by `codeindex.cli:main`.
-- CLI subcommands are noun/verb oriented: `init`, `config`, `sync`, `query`, `status`, `serve`.
-- Machine-readable output is preferred for steady-state commands. `sync`, `query`, and `status` print JSON payloads from `codeindex/cli.py`.
-- Human-readable output is still used for lifecycle/status lines such as initialization, config mutation, and watch/server startup in `codeindex/cli.py`.
-- The HTTP API exposes a single GET endpoint, `/search`, in `codeindex/server.py`.
-- API responses mirror CLI query payload shape: `query`, `workspace`, `metrics`, and `results`.
-- Boolean query parameters are passed as lowercase strings and normalized manually in `codeindex/server.py`.
-- Search modes are constrained to `"chunks"`, `"symbols"`, or `"hybrid"` in both CLI argument parsing and server validation.
-
-## Consistency Issues
-
-- Scalar parsing is duplicated. `parse_value` in `codeindex/cli.py` and `_parse_scalar` in `codeindex/config.py` do nearly the same job, but only `parse_value` lowercases booleans first.
-- Resource cleanup is inconsistent. `cmd_query` and `cmd_status` close `Storage` after successful work, but do not use `try/finally`, so unexpected exceptions can leak the connection. `cmd_serve` intentionally keeps the DB open for server lifetime.
-- Output format is mixed. Some commands print plain text (`init`, `config`, watch status, serve startup) while others print JSON. That is workable, but not uniformly automation-friendly.
-- Test helpers are duplicated instead of shared. `run_cmd` appears in both `tests/test_cli.py` and `tests/test_server.py`.
-- The repository is typed but does not show formatter, linter, or type-checker configuration in `pyproject.toml`. Conventions are implicit rather than enforced by tooling.
-- `codeindex/server.py` uses the `BaseHTTPRequestHandler` method name `do_GET` and suppresses naming lint with `# noqa: N802`; this is correct for the framework but breaks the otherwise consistent snake_case naming style.
-- `codeindex/config.py` catches broad `Exception` during YAML import. It supports the fallback story, but it also hides unexpected import-time failures.
-
-## Practical Takeaways
-
-- New code should stay stdlib-first, typed, and procedural unless complexity clearly justifies extra abstraction.
-- Data passed across module boundaries should continue to use dataclasses or plain dict payloads rather than ad hoc tuples where possible.
-- CLI additions should preserve the current pattern: parser setup in `build_parser`, work in `cmd_<name>`, integer return code, and JSON output when results are intended for automation.
-- If the project grows, the first consistency wins would be centralizing scalar parsing, introducing shared test helpers, and adding explicit lint/format/type tooling to `pyproject.toml`.
+## Practical Example
+- Good pattern: validate inputs at boundary (`codeindex/server.py` checks required query params) and return normalized payload.
+- Good pattern: keep ranking logic pure and side-effect free (`search_index` in `codeindex/search.py`), then add transport-specific wrapping in CLI/server.

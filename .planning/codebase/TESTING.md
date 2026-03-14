@@ -1,93 +1,63 @@
-# Testing Patterns
+﻿# Testing Guide
 
-## Framework
+## Frameworks and Tooling
+- Test runner is `pytest` (configured in `pyproject.toml` under `[tool.pytest.ini_options]` with `testpaths = ["tests"]`).
+- Tests use Python stdlib helpers for integration behavior:
+- `subprocess` for CLI process invocation in `tests/test_cli.py`.
+- `urllib.request` for HTTP and JSON-RPC calls in `tests/test_server.py`.
+- `concurrent.futures.ThreadPoolExecutor` for basic concurrency checks in `tests/test_server.py`.
+- Target executable path is `python -m codeindex.cli` to validate real CLI wiring, not function-level mocks.
 
-- The test suite is built around `pytest`, configured via `[tool.pytest.ini_options]` in `pyproject.toml`.
-- `testpaths = ["tests"]` makes `tests/` the single discovery root.
-- There is no sign of `unittest.TestCase`, `tox`, `nox`, `coverage`, or plugin-specific configuration in `pyproject.toml`.
-- I could not execute the suite in this environment because `pytest` is not installed, so the notes below describe the repository's current testing shape from source inspection.
+## Test Structure
+- Test files are grouped by surface:
+- `tests/test_cli.py` validates end-to-end CLI flows (`init`, `sync`, `query`, `status`, `analyze`, `memory ...`).
+- `tests/test_server.py` validates HTTP `/search`, `/analysis/*`, `/memory/*`, and MCP `POST /mcp` behaviors.
+- Typical test lifecycle pattern:
+- Create isolated temp workspace with `tmp_path`.
+- Write minimal fixture files into that temp project.
+- Run `init` + `sync` via subprocess.
+- Assert JSON payload shape and key invariants (counts, mode, backends, required fields).
+- For server tests: spawn CLI `serve` in a subprocess, sleep briefly, hit endpoints, then terminate process in `finally`.
 
-## Test Layout
+## Mocking and Isolation Strategy
+- Primary strategy is "real process, temp filesystem" instead of deep mocking.
+- Explicit monkeypatching is used only where external capability should be simulated:
+- `tests/test_cli.py::test_load_config_requires_pyyaml_when_config_exists` monkeypatches `codeindex.config.yaml` and `YAML_IMPORT_ERROR`.
+- Network is local-only (`127.0.0.1`), and persistent state is isolated to per-test temp configs/databases.
+- No heavy service mocks for storage/vector backends; tests accept backend variability by asserting membership in `{sqlite-vec, sqlite-vss, python-cosine}`.
 
-- Tests live in two files: `tests/test_cli.py` and `tests/test_server.py`.
-- The suite is organized by interface boundary rather than by internal module.
-- `tests/test_cli.py` covers the end-to-end CLI flows for `init`, `sync`, `query`, and `status`, plus behavior around global docs and symbol mode.
-- `tests/test_server.py` covers the HTTP search endpoint by starting the CLI server and calling it over `urllib`.
-- There is no `tests/conftest.py`, no shared fixture module, and no split between unit and integration directories.
+## Assertion Patterns
+- Prefer behavior/assertion over internal implementation checks.
+- Representative assertions:
+- Query includes ranked `results` and `metrics` (`tests/test_cli.py`, `tests/test_server.py`).
+- Symbol mode emits symbol hits (`tests/test_cli.py::test_symbol_mode_prefers_indexed_symbols`).
+- Incremental sync handles deletes and binary-like files (`tests/test_cli.py`).
+- MCP returns tool list and tool-call payload text (`tests/test_server.py::test_mcp_jsonrpc_tools_list_and_call`).
+- Memory endpoints return session/observation/citation data (`tests/test_cli.py`, `tests/test_server.py`).
 
-## Test Style
+## Coverage Signals
+- Strong integration coverage for transport layers:
+- CLI command matrix and happy-path JSON outputs in `tests/test_cli.py`.
+- HTTP + MCP protocol-level behavior in `tests/test_server.py`.
+- Important resilience signals covered:
+- malformed config handling,
+- invalid query mode handling,
+- concurrent request handling,
+- memory workflow round-trip (status/search/expand/session/viewer/stream).
 
-- Tests are integration-heavy. They exercise the installed module via `python -m codeindex.cli` subprocesses instead of calling command handlers directly.
-- Assertions focus on externally visible behavior: config file contents, JSON payload fields, result presence, workspace routing, and symbol preference.
-- Temporary filesystems are created with the built-in `tmp_path` fixture in every test.
-- Test data is created inline with minimal source files such as `app.py`, `main.py`, `service.py`, and `auth.py`.
-- JSON outputs are parsed with `json.loads(...)` and then asserted field-by-field.
-- `tests/test_server.py` uses a fixed sleep (`time.sleep(0.8)`) to wait for the server to boot, which is simple but timing-sensitive.
+## Gaps and Risk Areas
+- Limited direct unit coverage for core algorithm internals:
+- ranking/scoring branches in `codeindex/search.py` (symbol overlap boosts, fallback scan behavior),
+- chunk/symbol extraction edge cases in `codeindex/indexer.py` (regex patterns across languages),
+- AST/dependency/complexity branch matrix in `codeindex/analysis.py`.
+- Failure-path coverage is partial for server internals:
+- not many explicit tests for invalid MCP argument shapes and non-JSON request bodies in `codeindex/server.py`.
+- Memory worker behavior (`codeindex/memory_worker.py`) and retry/error accounting appears lightly exercised indirectly, not directly asserted.
+- No explicit coverage threshold enforcement is present in `pyproject.toml` (no `--cov`/fail-under policy).
 
-## Fixtures And Helpers
-
-- The only pytest fixture visibly used is `tmp_path`.
-- Both `tests/test_cli.py` and `tests/test_server.py` define the same local helper:
-  - `run_cmd(cmd, cwd)` wraps `subprocess.run(..., capture_output=True, text=True, check=True)`.
-- There are no reusable fixtures for:
-  - repo root resolution
-  - config creation
-  - project scaffolding
-  - server startup/teardown
-  - seeded storage instances
-- Because helpers are local to each file, reuse is low and future test expansion will likely repeat setup logic unless a `conftest.py` is introduced.
-
-## Mocking And Stubbing Patterns
-
-- There is effectively no mocking in the current suite.
-- The tests prefer real subprocess execution, real filesystem I/O, real SQLite database creation, and a real HTTP server process.
-- This means the suite currently behaves more like black-box acceptance testing than isolated unit testing.
-- No `unittest.mock`, monkeypatching, fake storage objects, or stub embeddings are present in `tests/test_cli.py` or `tests/test_server.py`.
-
-## Coverage Shape
-
-- Covered paths:
-  - CLI initialization and config file creation through `tests/test_cli.py`
-  - Workspace sync and query happy paths through `tests/test_cli.py`
-  - Inclusion of global docs in query results through `tests/test_cli.py`
-  - Symbol-biased retrieval mode through `tests/test_cli.py`
-  - HTTP `/search` endpoint happy path through `tests/test_server.py`
-- Covered user-facing payload expectations:
-  - `metrics.mode`
-  - `estimated_tokens_saved`
-  - presence of `results`
-  - symbol metadata in results
-  - status counts such as `files` and `symbols`
-- Lightly or not covered from current tests:
-  - `codeindex/config.py` internals such as `_deep_merge`, `_parse_simple_yaml`, `_to_simple_yaml`, and `set_config_value`
-  - `codeindex/embedding.py` validation and math behavior, including invalid chunk sizes and dimension mismatch handling
-  - `codeindex/storage.py` migration logic, deletion behavior, counts edge cases, and workspace token counting
-  - `codeindex/indexer.py` exclusion handling, unchanged-file skipping, deletion detection, regex symbol extraction for non-Python files, and syntax-error tolerance
-  - `codeindex/search.py` workspace resolution, scoring details, and mode fallback behavior
-  - `codeindex/server.py` negative paths such as missing params, invalid `top_k`, invalid `mode`, and unknown routes
-  - `codeindex/cli.py` negative paths such as missing workspace requirements, `init` overwrite refusal, and watch mode behavior
-
-## Reliability Characteristics
-
-- The current approach gives decent confidence that the main product flows work together end to end.
-- The suite is likely slower than necessary as it repeatedly shells out to Python and creates fresh storage for each test.
-- Failure localization is weaker than with unit tests because multiple layers are exercised at once.
-- The fixed port in `tests/test_server.py` (`9134`) can conflict with other processes.
-- The startup wait in `tests/test_server.py` can create flaky behavior on slower machines or CI runners.
-
-## Practical Gaps
-
-- Add unit tests for pure helpers in `codeindex/embedding.py`, `codeindex/config.py`, and `codeindex/search.py`.
-- Add storage-focused tests around `codeindex/storage.py`, especially schema migration and deletion behavior.
-- Add indexer tests for `should_exclude`, symbol extraction across suffixes, and unchanged/deleted file bookkeeping in `codeindex/indexer.py`.
-- Add negative-path server tests for bad query strings in `codeindex/server.py`.
-- Add CLI tests for failure exit codes and human-readable error messages in `codeindex/cli.py`.
-- Centralize subprocess and temp-project setup in `tests/conftest.py` or a shared helper module.
-- Replace fixed sleeps and fixed ports in `tests/test_server.py` with readiness polling and ephemeral port allocation.
-
-## Recommended Testing Direction
-
-- Keep the current integration tests because they validate the repository's primary interfaces well.
-- Layer in small unit tests for pure logic so regressions are caught closer to the source.
-- Introduce shared fixtures once more test cases are added; the duplicated setup is manageable now but will become noise quickly.
-- If CI is added or expanded, include explicit coverage reporting so the current "happy-path heavy" shape becomes measurable instead of inferred.
+## Practical Additions (High Value)
+- Add focused unit tests for `codeindex/search.py::search_index` and `_fallback_scan_top_k` using deterministic chunk fixtures.
+- Add table-driven tests for `codeindex/indexer.py::extract_regex_symbols` and `extract_symbols` per suffix.
+- Add negative protocol tests for `codeindex/server.py` (`/mcp` invalid params, unknown methods/tools).
+- Add worker-specific tests around `codeindex/memory_worker.py` retry transitions and failed queue handling.
+- Add optional coverage reporting (e.g., pytest-cov) to track regression risk on core logic, not only end-to-end flows.

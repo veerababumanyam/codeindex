@@ -1,76 +1,52 @@
-# Technology Stack
+# Technology Stack Map
 
-## Overview
-- Repository type: local-first Python application packaged as a CLI with an optional HTTP search server.
-- Primary package: `codeindex/`
-- Entry point: `codeindex` console script from `pyproject.toml`
-- Tests: `tests/`
+## Languages and Runtime
+- Primary language: Python 3.10+ (`pyproject.toml`, `codeindex/*.py`).
+- Runtime model: local CLI + local HTTP server (`codeindex/cli.py`, `codeindex/server.py`).
+- Targeted source-language analysis coverage includes `.py`, `.js/.jsx`, `.ts/.tsx`, `.go`, `.rs`, `.java`, `.c/.cpp` (`codeindex/analysis.py`, `codeindex/indexer.py`).
 
-## Languages
-- Python 3.10+ is the only implemented language runtime requirement in `pyproject.toml`.
-- YAML is used for user configuration files such as `codeindex.yaml` and the sample at `docs/codeindex.example.yaml`.
-- SQL is embedded as SQLite schema strings in `codeindex/storage.py`.
+## Packaging and Build System
+- Build backend: setuptools (`pyproject.toml` `[build-system]`).
+- Package metadata entrypoint: `codeindex-sync` (`pyproject.toml` `[project]`).
+- Console script: `codeindex` mapped to `codeindex.cli:main` (`pyproject.toml` `[project.scripts]`).
+- Editable install workflow documented in `README.md` (`pip install -e .`).
 
-## Runtime And Execution Model
-- CLI runtime is pure Python via `argparse` in `codeindex/cli.py`.
-- HTTP serving uses the Python standard library `http.server.ThreadingHTTPServer` in `codeindex/server.py`.
-- Persistent local storage uses `sqlite3` with a file database at `.codeindex/index.db`, created by `codeindex/storage.py`.
-- File indexing walks local directories with `pathlib.Path.rglob()` in `codeindex/indexer.py`.
-- Search and embedding are in-process and synchronous; there is no job queue, background worker, or async framework.
+## Core Frameworks and Standard Libraries
+- CLI framework: stdlib `argparse` (`codeindex/cli.py`).
+- HTTP framework: stdlib `http.server` with `ThreadingHTTPServer` (`codeindex/server.py`).
+- Data storage layer: stdlib `sqlite3` with custom schema + migrations (`codeindex/storage.py`, `codeindex/memory_storage.py`).
+- JSON-RPC handling: custom implementation over `POST /mcp` (`codeindex/server.py`).
 
-## Frameworks And Libraries
-- Packaging backend: `setuptools.build_meta` from `pyproject.toml`.
-- Test runner: `pytest` configured in `pyproject.toml`.
-- Standard library modules provide most functionality: `argparse`, `json`, `sqlite3`, `http.server`, `urllib.parse`, `pathlib`, `ast`, `fnmatch`, `hashlib`, `re`, and `time`.
-- Optional dependency: `PyYAML` if importable as `yaml` in `codeindex/config.py`.
-- Fallback behavior: if `yaml` is unavailable, config parsing/writing falls back to a minimal in-repo YAML implementation in `codeindex/config.py`.
+## Dependencies
+- Required runtime deps (`pyproject.toml`):
+- `PyYAML>=6.0` for config load/save (`codeindex/config.py`).
+- `sqlite-vec>=0.1.6` optional-preferred vector extension (`codeindex/storage.py`).
+- `sqlite-vss>=0.1.2` optional fallback vector extension (`codeindex/storage.py`).
+- Optional extra `analysis`: `tree-sitter-languages>=1.10.2` (`pyproject.toml`, `codeindex/analysis.py`).
+- No network SDK dependency for embeddings; embeddings are deterministic/local (`codeindex/embedding.py`).
 
-## Dependency Footprint
-- Declared build dependency: `setuptools>=68` in `pyproject.toml`.
-- No runtime dependencies are declared under `[project.dependencies]` in `pyproject.toml`.
-- The repository intentionally runs without network-backed embedding or retrieval dependencies; embeddings are local hashed token vectors in `codeindex/embedding.py`.
+## Configuration Surface
+- Primary config file: `codeindex.yaml` (sample: `docs/codeindex.example.yaml`).
+- Config schema and validation live in `codeindex/config.py` and `codeindex/memory_config.py`.
+- Key groups: `workspace`, `paths`, `indexing`, `watch`, `excludes`, `query`, `analysis`, `memory` (`codeindex/config.py`).
+- Default DB path is generated as `.codeindex/index.db` relative to config directory (`codeindex/cli.py`).
 
-## Packaging And Distribution
-- Package name: `codeindex-sync` in `pyproject.toml`.
-- Version source is duplicated as `0.1.0` in both `pyproject.toml` and `codeindex/__init__.py`.
-- Console command: `codeindex = "codeindex.cli:main"` in `pyproject.toml`.
-- The codebase is laid out as a single import package under `codeindex/` rather than a `src/` layout.
+## Data and Indexing Internals
+- Core relational tables: `files`, `chunks` (`codeindex/storage.py`).
+- Memory subsystem tables + FTS5 table: `memory_*`, `memory_observation_fts` (`codeindex/memory_storage.py`).
+- Vector backend selection order: `sqlite-vec` -> `sqlite-vss` -> python cosine fallback (`codeindex/storage.py`).
 
-## Configuration Model
-- Default configuration is defined in `codeindex/config.py` as `DEFAULT_CONFIG`.
-- Runtime config file path defaults to `codeindex.yaml` and can be overridden with `--config` in `codeindex/cli.py`.
-- Implemented config areas:
-  - `workspace`
-  - `paths.project_root`
-  - `paths.global_docs`
-  - `indexing.chunk_size`
-  - `indexing.chunk_overlap`
-  - `indexing.max_response_tokens`
-  - `watch.enabled`
-  - `watch.debounce_ms`
-  - `excludes`
-  - `query.top_k`
-  - `query.include_global_docs`
-  - `query.require_workspace`
-  - `query.mode`
-- Example-only config drift: `docs/codeindex.example.yaml` includes `llm.*`, `indexing.enable_ast_summaries`, and `indexing.compression_target_ratio`, but those keys are not used by the implemented Python modules.
+## Interfaces and Tooling
+- CLI commands: `init`, `config`, `sync`, `query`, `status`, `serve`, `analyze`, `memory ...` (`codeindex/cli.py`).
+- HTTP endpoints: `/search`, `/analysis/*`, `/memory/*` (`codeindex/server.py`, `README.md`).
+- MCP JSON-RPC endpoint: `/mcp` with tool discovery and tool calls (`codeindex/server.py`).
 
-## Key File Paths
-- `pyproject.toml`: package metadata, Python requirement, console script, pytest config.
-- `README.md`: product intent, commands, and storage model summary.
-- `codeindex/cli.py`: command parsing and orchestration for `init`, `config`, `sync`, `query`, `status`, and `serve`.
-- `codeindex/config.py`: config defaults, YAML load/save, dotted-key updates.
-- `codeindex/indexer.py`: filesystem scan, chunking, symbol extraction, sync logic.
-- `codeindex/embedding.py`: deterministic local embedding and cosine similarity.
-- `codeindex/search.py`: workspace resolution, scoring, and retrieval metrics.
-- `codeindex/storage.py`: SQLite schema, migrations, and persistence API.
-- `codeindex/server.py`: HTTP `/search` endpoint.
-- `docs/codeindex.example.yaml`: sample config with aspirational fields beyond current implementation.
-- `tests/test_cli.py`: CLI integration tests over init/sync/query/status/global-docs/symbol-mode.
-- `tests/test_server.py`: HTTP server integration test for `/search`.
+## Testing and Dev Tooling
+- Test runner config: `pytest` (`pyproject.toml` `[tool.pytest.ini_options]`).
+- Test coverage files: `tests/test_cli.py`, `tests/test_server.py`.
+- Concurrency behavior in server tests uses multiple requests and thread pool (`tests/test_server.py`).
 
-## Notable Technical Characteristics
-- Local-first by design: indexing, embeddings, search, and storage all run on the local machine.
-- No typed validation framework such as `pydantic`, `dataclasses-json`, or `marshmallow`; config is plain nested dictionaries.
-- No web framework such as FastAPI, Flask, or Django; the server surface is a minimal stdlib HTTP handler.
-- No ORM or migration framework; schema management is hand-written SQL plus lightweight runtime column checks in `codeindex/storage.py`.
+## Practical Example
+- Initialize project config: `codeindex init --path /myproject --workspace myapp` (`README.md`, `codeindex/cli.py`).
+- Build local index: `codeindex sync`.
+- Start service: `codeindex serve --host 127.0.0.1 --port 9090`.
