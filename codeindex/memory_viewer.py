@@ -10,7 +10,7 @@ def render_viewer_page(workspace: str) -> bytes:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CodeSync | Cognitive Map</title>
+  <title>CodeIndex | Cognitive Map</title>
   <script src="https://unpkg.com/force-graph"></script>
   <style>
     :root {{
@@ -150,7 +150,7 @@ def render_viewer_page(workspace: str) -> bytes:
 </head>
 <body>
   <header>
-    <div class="logo">CodeSync <span style="color:var(--muted); font-weight:300;">Cognitive Map | Persistent Memory Viewer</span></div>
+    <div class="logo">CodeIndex <span style="color:var(--muted); font-weight:300;">Cognitive Map | Persistent Memory Viewer</span></div>
     <div class="workspace-tag">Workspace: {escape(workspace)}</div>
   </header>
   

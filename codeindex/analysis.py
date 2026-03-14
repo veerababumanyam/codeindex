@@ -7,39 +7,17 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .indexer import TEXT_EXTS, extract_symbols
+from .indexer import (
+    TEXT_EXTS,
+    extract_symbols,
+    TS_LANGUAGE_BY_EXT,
+    TS_SYMBOL_NODE_TYPES,
+    _ts_parser_for_suffix,
+    _ts_iter_nodes,
+    _ts_node_name,
+    _ts_node_snippet,
+)
 from .storage import Storage
-
-try:
-    from tree_sitter_languages import get_parser as ts_get_parser  # type: ignore
-except Exception:  # pragma: no cover - optional runtime capability
-    ts_get_parser = None
-
-
-TS_LANGUAGE_BY_EXT = {
-    ".py": "python",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".ts": "typescript",
-    ".tsx": "tsx",
-    ".go": "go",
-    ".rs": "rust",
-    ".java": "java",
-    ".c": "c",
-    ".cpp": "cpp",
-}
-
-TS_SYMBOL_NODE_TYPES = {
-    "function_definition",
-    "function_declaration",
-    "method_definition",
-    "class_definition",
-    "class_declaration",
-    "interface_declaration",
-    "type_alias_declaration",
-    "variable_declarator",
-    "lexical_declaration",
-}
 
 TS_COMPLEXITY_NODE_TYPES = {
     "if_statement",
@@ -52,10 +30,8 @@ TS_COMPLEXITY_NODE_TYPES = {
     "conditional_expression",
 }
 
-
 def should_exclude(rel_path: str, excludes: list[str]) -> bool:
     return any(fnmatch.fnmatch(rel_path, pattern) for pattern in excludes)
-
 
 def iter_text_files(root: Path, excludes: list[str]) -> list[Path]:
     files: list[Path] = []
@@ -69,20 +45,17 @@ def iter_text_files(root: Path, excludes: list[str]) -> list[Path]:
     files.sort()
     return files
 
-
 def _read_text(path: Path) -> str:
     raw = path.read_bytes()
     if b"\x00" in raw:
         return ""
     return raw.decode("utf-8-sig", errors="ignore")
 
-
 def _ensure_within_root(root: Path, target: Path, label: str) -> None:
     try:
         target.relative_to(root)
     except ValueError as exc:
         raise ValueError(f"{label} escapes the configured project root") from exc
-
 
 def validate_relative_path(rel_path: str) -> str:
     normalized = rel_path.replace("\\", "/").strip()
@@ -97,7 +70,6 @@ def validate_relative_path(rel_path: str) -> str:
         raise ValueError(f"{rel_path} escapes the configured project root")
     return pure.as_posix()
 
-
 def _resolve_file(root: Path, rel_path: str) -> Path:
     safe_rel_path = validate_relative_path(rel_path)
     target = (root / safe_rel_path).resolve()
@@ -105,50 +77,6 @@ def _resolve_file(root: Path, rel_path: str) -> Path:
     if not target.exists() or not target.is_file():
         raise ValueError(f"Path not found: {safe_rel_path}")
     return target
-
-
-def _ts_parser_for_suffix(suffix: str):
-    if ts_get_parser is None:
-        return None
-    lang = TS_LANGUAGE_BY_EXT.get(suffix.lower())
-    if not lang:
-        return None
-    try:
-        return ts_get_parser(lang)
-    except Exception:
-        return None
-
-
-def _ts_iter_nodes(root_node):
-    stack = [root_node]
-    while stack:
-        node = stack.pop()
-        yield node
-        children = getattr(node, "children", [])
-        if children:
-            stack.extend(reversed(children))
-
-
-def _ts_node_name(node, source_bytes: bytes) -> str | None:
-    try:
-        name_node = node.child_by_field_name("name")
-    except Exception:
-        name_node = None
-    if name_node is not None:
-        try:
-            return source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="ignore").strip()
-        except Exception:
-            return None
-    return None
-
-
-def _ts_node_snippet(node, text: str) -> str:
-    lines = text.splitlines()
-    start = int(node.start_point[0]) + 1
-    end = int(node.end_point[0]) + 1
-    if 1 <= start <= len(lines):
-        return "\n".join(lines[start - 1 : min(end, len(lines))])
-    return ""
 
 
 def _ts_has_error(node) -> bool:
@@ -512,7 +440,7 @@ def project_stats(root: Path, excludes: list[str]) -> dict[str, Any]:
     }
 
 
-def extract_graph_data(storage: Storage, workspace: str, root: Path, excludes: list[str]) -> dict[str, Any]:
+async def extract_graph_data(storage: Storage, workspace: str, root: Path, excludes: list[str]) -> dict[str, Any]:
     nodes: list[dict[str, Any]] = []
     links: list[dict[str, Any]] = []
     seen_nodes: set[str] = set()
@@ -544,11 +472,12 @@ def extract_graph_data(storage: Storage, workspace: str, root: Path, excludes: l
                     break
 
     # 3. Fetch Symbols from Storage
-    cursor = storage.conn.execute(
+    cursor = await storage.conn.execute(
         "SELECT path, symbol_name FROM chunks WHERE workspace=? AND source_kind='symbol'",
         (workspace,),
     )
-    for path, symbol_name in cursor:
+    rows = await cursor.fetchall()
+    for path, symbol_name in rows:
         if not symbol_name:
             continue
         node_id = f"symbol:{path}:{symbol_name}"
@@ -558,22 +487,24 @@ def extract_graph_data(storage: Storage, workspace: str, root: Path, excludes: l
         links.append({"source": f"file:{path}", "target": node_id, "kind": "contains"})
 
     # 4. Fetch Memory Observations
-    cursor = storage.conn.execute(
+    cursor = await storage.conn.execute(
         "SELECT observation_id, title, kind FROM memory_observations WHERE workspace=? AND status='processed'",
         (workspace,),
     )
-    for obs_id, title, kind in cursor:
+    obs_rows = await cursor.fetchall()
+    for obs_id, title, kind in obs_rows:
         node_id = f"obs:{obs_id}"
         if node_id not in seen_nodes:
             nodes.append({"id": node_id, "label": title, "kind": "observation", "group": 3, "subkind": kind})
             seen_nodes.add(node_id)
 
     # 5. Fetch Citations (Links between Observations and Files/Symbols)
-    cursor = storage.conn.execute(
+    cursor = await storage.conn.execute(
         "SELECT observation_id, snippet FROM memory_citations WHERE workspace=?",
         (workspace,),
     )
-    for obs_id, snippet in cursor:
+    cit_rows = await cursor.fetchall()
+    for obs_id, snippet in cit_rows:
         # Heuristic: Find mentioned files or symbols in snippet
         # This is basic; in a real app, we'd have better structured linking
         for node in nodes:

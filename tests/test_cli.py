@@ -463,7 +463,6 @@ def test_vector_dependencies_are_optional_in_pyproject():
     assert all(not dep.startswith("sqlite-vec") for dep in dependencies)
     assert all(not dep.startswith("sqlite-vss") for dep in dependencies)
     assert any(dep.startswith("sqlite-vec") for dep in data["project"]["optional-dependencies"]["vectors"])
-    assert any(dep.startswith("sqlite-vss") for dep in data["project"]["optional-dependencies"]["vectors"])
 
 
 def test_query_and_status_report_python_cosine_when_vectors_disabled(tmp_path: Path):

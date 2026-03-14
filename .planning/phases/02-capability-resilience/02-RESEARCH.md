@@ -6,7 +6,7 @@
 
 ## Phase Intent
 
-Phase 2 should make the repository install and run predictably in a plain Python + SQLite environment while keeping optional accelerators available when the host supports them. The code already has the right broad direction for vector fallback in [`codeindex/storage.py`](/c:/Users/admin/Desktop/CodeSync/codeindex/storage.py), but packaging, memory schema creation, and operator-visible capability reporting are still inconsistent with that intent.
+Phase 2 should make the repository install and run predictably in a plain Python + SQLite environment while keeping optional accelerators available when the host supports them. The code already has the right broad direction for vector fallback in [`codeindex/storage.py`](/c:/Users/admin/Desktop/CodeIndex/codeindex/storage.py), but packaging, memory schema creation, and operator-visible capability reporting are still inconsistent with that intent.
 
 The implementation should preserve three guarantees:
 
@@ -18,27 +18,27 @@ The implementation should preserve three guarantees:
 
 ## CAP-01: Packaging and Default Install Behavior
 
-- [`pyproject.toml`](/c:/Users/admin/Desktop/CodeSync/pyproject.toml) currently hard-requires `sqlite-vec` and `sqlite-vss`, which directly contradicts the existing runtime fallback path in [`codeindex/storage.py`](/c:/Users/admin/Desktop/CodeSync/codeindex/storage.py).
-- [`Storage._try_enable_vector_extension()`](/c:/Users/admin/Desktop/CodeSync/codeindex/storage.py) already falls back deterministically from `sqlite-vec` to `sqlite-vss` to `python-cosine`.
+- [`pyproject.toml`](/c:/Users/admin/Desktop/CodeIndex/pyproject.toml) currently hard-requires `sqlite-vec` and `sqlite-vss`, which directly contradicts the existing runtime fallback path in [`codeindex/storage.py`](/c:/Users/admin/Desktop/CodeIndex/codeindex/storage.py).
+- [`Storage._try_enable_vector_extension()`](/c:/Users/admin/Desktop/CodeIndex/codeindex/storage.py) already falls back deterministically from `sqlite-vec` to `sqlite-vss` to `python-cosine`.
 - Existing query tests already accept all three backends in both CLI and HTTP flows, which is a strong sign that the codebase is already designed for optional vector acceleration.
 
 Implication: CAP-01 is primarily a packaging and verification problem, not a search-architecture rewrite.
 
 ## CAP-02: Memory Degradation When FTS5 Is Missing
 
-- [`codeindex/memory_storage.py`](/c:/Users/admin/Desktop/CodeSync/codeindex/memory_storage.py) probes FTS5 with `fts5_available()`, but `MemoryStorage.__init__()` still unconditionally runs `CREATE VIRTUAL TABLE ... USING fts5(...)`.
+- [`codeindex/memory_storage.py`](/c:/Users/admin/Desktop/CodeIndex/codeindex/memory_storage.py) probes FTS5 with `fts5_available()`, but `MemoryStorage.__init__()` still unconditionally runs `CREATE VIRTUAL TABLE ... USING fts5(...)`.
 - `mark_processed()` unconditionally writes to `memory_observation_fts`.
 - `search_observations()` unconditionally queries `memory_observation_fts` with `bm25(...)`.
-- [`MemoryService.capabilities()`](/c:/Users/admin/Desktop/CodeSync/codeindex/memory_service.py) already records an FTS5 capability snapshot, so the reporting path exists, but the storage/search implementation does not honor it yet.
+- [`MemoryService.capabilities()`](/c:/Users/admin/Desktop/CodeIndex/codeindex/memory_service.py) already records an FTS5 capability snapshot, so the reporting path exists, but the storage/search implementation does not honor it yet.
 
 Implication: CAP-02 needs a real storage-level bifurcation between accelerated FTS search and degraded SQL/Python text search. The degradation decision should live in `MemoryStorage`, not in CLI/server handlers.
 
 ## CAP-03: Capability Visibility
 
-- Query responses already expose `metrics.vector_backend` from [`codeindex/search.py`](/c:/Users/admin/Desktop/CodeSync/codeindex/search.py).
-- [`cmd_status()`](/c:/Users/admin/Desktop/CodeSync/codeindex/cli.py) currently returns only index counts, so the main CLI status surface hides the active vector mode.
-- Memory status already returns a `capabilities` list from [`MemoryStorage.status()`](/c:/Users/admin/Desktop/CodeSync/codeindex/memory_storage.py), but it only contains `name`, `available`, and `checked_at`, not the effective search mode or degraded reason.
-- HTTP `/memory/status` and MCP `codeindex_memory_status` mirror the same storage payload via [`codeindex/server.py`](/c:/Users/admin/Desktop/CodeSync/codeindex/server.py), so CAP-03 can be solved centrally if the status payload is improved in `Storage` and `MemoryStorage`.
+- Query responses already expose `metrics.vector_backend` from [`codeindex/search.py`](/c:/Users/admin/Desktop/CodeIndex/codeindex/search.py).
+- [`cmd_status()`](/c:/Users/admin/Desktop/CodeIndex/codeindex/cli.py) currently returns only index counts, so the main CLI status surface hides the active vector mode.
+- Memory status already returns a `capabilities` list from [`MemoryStorage.status()`](/c:/Users/admin/Desktop/CodeIndex/codeindex/memory_storage.py), but it only contains `name`, `available`, and `checked_at`, not the effective search mode or degraded reason.
+- HTTP `/memory/status` and MCP `codeindex_memory_status` mirror the same storage payload via [`codeindex/server.py`](/c:/Users/admin/Desktop/CodeIndex/codeindex/server.py), so CAP-03 can be solved centrally if the status payload is improved in `Storage` and `MemoryStorage`.
 
 Implication: the missing work is not transport parity. The missing work is a normalized capability summary produced once in domain/storage code and reused everywhere.
 
@@ -48,8 +48,8 @@ Implication: the missing work is not transport parity. The missing work is a nor
 
 - Keep SQLite as the only required database dependency.
 - Keep `sqlite-vec` and `sqlite-vss` as optional accelerators only.
-- Keep the existing pure-Python cosine fallback in [`codeindex/search.py`](/c:/Users/admin/Desktop/CodeSync/codeindex/search.py).
-- Implement FTS degradation with plain SQLite table scans and `LIKE` filters inside [`MemoryStorage.search_observations()`](/c:/Users/admin/Desktop/CodeSync/codeindex/memory_storage.py).
+- Keep the existing pure-Python cosine fallback in [`codeindex/search.py`](/c:/Users/admin/Desktop/CodeIndex/codeindex/search.py).
+- Implement FTS degradation with plain SQLite table scans and `LIKE` filters inside [`MemoryStorage.search_observations()`](/c:/Users/admin/Desktop/CodeIndex/codeindex/memory_storage.py).
 - Keep capability computation local to `Storage` and `MemoryService` rather than adding new config switches.
 
 ## Architecture Patterns
@@ -118,7 +118,7 @@ This is enough for CAP-02 because the phase requirement is degraded usefulness, 
 
 ### 4. Guard FTS maintenance writes
 
-[`mark_processed()`](/c:/Users/admin/Desktop/CodeSync/codeindex/memory_storage.py) must not touch `memory_observation_fts` when the virtual table does not exist. That write path should check an instance-level capability flag computed at initialization.
+[`mark_processed()`](/c:/Users/admin/Desktop/CodeIndex/codeindex/memory_storage.py) must not touch `memory_observation_fts` when the virtual table does not exist. That write path should check an instance-level capability flag computed at initialization.
 
 Without this guard, memory processing will still fail later even if schema init is fixed.
 

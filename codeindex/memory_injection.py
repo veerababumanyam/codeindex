@@ -7,7 +7,7 @@ from .memory_search import search_memory
 from .memory_storage import MemoryStorage
 
 
-def compute_injection(
+async def compute_injection(
     storage: MemoryStorage,
     session_id: str,
     workspace: str,
@@ -17,7 +17,7 @@ def compute_injection(
     max_injected_observations: int,
     min_importance: float,
 ) -> dict[str, Any]:
-    payload = search_memory(
+    payload = await search_memory(
         storage=storage,
         query=query_text,
         workspace=workspace,
@@ -39,7 +39,7 @@ def compute_injection(
         selected_observation_ids=[item["observation_id"] for item in selected],
         reasons=["relevance", "recency", "importance", "workspace_match"],
     )
-    storage.record_injection(
+    await storage.record_injection(
         session_id=decision.session_id,
         workspace=decision.workspace,
         event=decision.event,

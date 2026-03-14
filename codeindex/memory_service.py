@@ -42,22 +42,26 @@ class MemoryService:
     def enabled(self) -> bool:
         return bool(self._memory_cfg().get("enabled", False))
 
-    def capabilities(self) -> CapabilitySnapshot:
+    async def capabilities(self) -> CapabilitySnapshot:
+        async with self.storage.conn.execute("select sqlite_version()") as cursor:
+            row = await cursor.fetchone()
+            sqlite_version = row[0] if row else "unknown"
+
         snapshot = CapabilitySnapshot(
-            fts5_available=fts5_available(self.storage.conn),
+            fts5_available=await fts5_available(self.storage.conn),
             yaml_available=yaml is not None,
             checked_at=utc_now(),
             details={
-                "sqlite_version": self.storage.conn.execute("select sqlite_version()").fetchone()[0],
+                "sqlite_version": sqlite_version,
                 "memory_search_backend": self.memory.search_backend_name(),
             },
         )
-        self.memory.record_capability(snapshot)
-        self.storage.commit()
+        await self.memory.record_capability(snapshot)
+        await self.storage.commit()
         return snapshot
 
-    def capability_summary(self) -> dict[str, object]:
-        snapshot = self.capabilities()
+    async def capability_summary(self) -> dict[str, object]:
+        snapshot = await self.capabilities()
         return {
             "memory_search_backend": self.memory.search_backend_name(),
             "fts5_available": snapshot.fts5_available,
@@ -65,7 +69,7 @@ class MemoryService:
             "degraded": not snapshot.fts5_available,
         }
 
-    def start_session(self, workspace: str, project_root: Path, actor_surface: str, command_name: str, trigger_kind: str) -> MemoryContext:
+    async def start_session(self, workspace: str, project_root: Path, actor_surface: str, command_name: str, trigger_kind: str) -> MemoryContext:
         session = MemorySession(
             session_id=f"sess_{uuid.uuid4().hex[:12]}",
             workspace=workspace,
@@ -76,8 +80,8 @@ class MemoryService:
             command_name=command_name,
             metadata={"actor_surface": actor_surface},
         )
-        self.memory.create_session(session)
-        self.storage.commit()
+        await self.memory.create_session(session)
+        await self.storage.commit()
         return MemoryContext(
             session_id=session.session_id,
             workspace=session.workspace,
@@ -86,11 +90,11 @@ class MemoryService:
             command_name=command_name,
         )
 
-    def end_session(self, context: MemoryContext) -> None:
-        self.memory.end_session(context.session_id, utc_now())
-        self.storage.commit()
+    async def end_session(self, context: MemoryContext) -> None:
+        await self.memory.end_session(context.session_id, utc_now())
+        await self.storage.commit()
 
-    def capture_event(
+    async def capture_event(
         self,
         context: MemoryContext,
         event_name: str,
@@ -115,27 +119,27 @@ class MemoryService:
         )
         self.hooks.dispatch(event)
         observation = build_raw_observation(event, observation_id=f"obs_{uuid.uuid4().hex[:12]}")
-        self.memory.add_observation(observation)
-        self.memory.enqueue_observation(observation.observation_id, event.timestamp)
-        self.storage.commit()
+        await self.memory.add_observation(observation)
+        await self.memory.enqueue_observation(observation.observation_id, event.timestamp)
+        await self.storage.commit()
         return observation.observation_id
 
-    def run_worker_once(self) -> dict[str, int]:
+    async def run_worker_once(self) -> dict[str, int]:
         cfg = self._memory_cfg()
         worker_cfg = cfg.get("worker", {})
         if not worker_cfg.get("enabled", True):
             return {"processed": 0, "failed": 0, "claimed": 0}
-        return process_pending_observations(
+        return await process_pending_observations(
             storage=self.memory,
             max_batch_size=int(worker_cfg.get("max_batch_size", 20)),
             max_retries=int(worker_cfg.get("max_retries", 3)),
         )
 
-    def inject(self, context: MemoryContext, event: str, query_text: str) -> dict[str, Any]:
+    async def inject(self, context: MemoryContext, event: str, query_text: str) -> dict[str, Any]:
         cfg = self._memory_cfg()
         if not self.enabled():
             return {"results": []}
-        return compute_injection(
+        return await compute_injection(
             storage=self.memory,
             session_id=context.session_id,
             workspace=context.workspace,
@@ -146,10 +150,10 @@ class MemoryService:
             min_importance=float(cfg.get("min_importance", 0.2)),
         )
 
-    def search(self, workspace: str, query: str, layer: str, budget_tokens: int | None = None, max_results: int = 8) -> dict[str, Any]:
+    async def search(self, workspace: str, query: str, layer: str, budget_tokens: int | None = None, max_results: int = 8) -> dict[str, Any]:
         cfg = self._memory_cfg()
         budget = budget_tokens if budget_tokens is not None else int(cfg.get("summary_budget_tokens", 600))
-        return search_memory(
+        return await search_memory(
             storage=self.memory,
             query=query,
             workspace=workspace,
@@ -159,10 +163,10 @@ class MemoryService:
             min_importance=float(cfg.get("min_importance", 0.2)),
         )
 
-    def expand(self, observation_id: str) -> dict[str, Any]:
-        return expand_memory(self.memory, observation_id)
+    async def expand(self, observation_id: str) -> dict[str, Any]:
+        return await expand_memory(self.memory, observation_id)
 
-    def list_sessions(self, workspace: str) -> list[dict[str, Any]]:
+    async def list_sessions(self, workspace: str) -> list[dict[str, Any]]:
         return [
             {
                 "session_id": item.session_id,
@@ -174,11 +178,11 @@ class MemoryService:
                 "command_name": item.command_name,
                 "metadata": item.metadata,
             }
-            for item in self.memory.list_sessions(workspace)
+            for item in await self.memory.list_sessions(workspace)
         ]
 
-    def get_session(self, session_id: str) -> dict[str, Any]:
-        item = self.memory.get_session(session_id)
+    async def get_session(self, session_id: str) -> dict[str, Any]:
+        item = await self.memory.get_session(session_id)
         if item is None:
             raise ValueError(f"Unknown session id: {session_id}")
         return {
@@ -192,7 +196,7 @@ class MemoryService:
             "metadata": item.metadata,
         }
 
-    def citations(self, target_id: str) -> dict[str, Any]:
+    async def citations(self, target_id: str) -> dict[str, Any]:
         return {
             "target_id": target_id,
             "citations": [
@@ -204,14 +208,14 @@ class MemoryService:
                     "snippet": item.snippet,
                     "created_at": item.created_at,
                 }
-                for item in self.memory.list_citations(target_id)
+                for item in await self.memory.list_citations(target_id)
             ],
         }
 
-    def status(self, workspace: str) -> dict[str, Any]:
-        payload = self.memory.status(workspace)
-        payload["capabilities"].update(self.capability_summary())
+    async def status(self, workspace: str) -> dict[str, Any]:
+        payload = await self.memory.status(workspace)
+        payload["capabilities"].update(await self.capability_summary())
         return payload
 
-    def recent_stream_events(self, workspace: str, limit: int) -> list[dict[str, Any]]:
-        return self.memory.recent_stream_events(workspace, limit=limit)
+    async def recent_stream_events(self, workspace: str, limit: int) -> list[dict[str, Any]]:
+        return await self.memory.recent_stream_events(workspace, limit=limit)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import argparse
 import json
 import time
@@ -44,13 +45,13 @@ def _json_print(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2))
 
 
-def _memory_service(storage: Storage, loaded_config: dict[str, Any]) -> MemoryService:
+async def _memory_service(storage: Storage, loaded_config: dict[str, Any]) -> MemoryService:
     service = MemoryService(storage=storage, config=loaded_config)
-    service.capabilities()
+    await service.capabilities()
     return service
 
 
-def _start_memory_context(
+async def _start_memory_context(
     memory_service: MemoryService,
     workspace: str,
     project_root: Path,
@@ -58,7 +59,7 @@ def _start_memory_context(
 ) -> MemoryContext | None:
     if not memory_service.enabled():
         return None
-    return memory_service.start_session(
+    return await memory_service.start_session(
         workspace=workspace,
         project_root=project_root,
         actor_surface="cli",
@@ -67,7 +68,7 @@ def _start_memory_context(
     )
 
 
-def _finish_memory_context(
+async def _finish_memory_context(
     memory_service: MemoryService,
     context: MemoryContext | None,
     event_name: str,
@@ -79,7 +80,7 @@ def _finish_memory_context(
 ) -> None:
     if context is None:
         return
-    memory_service.capture_event(
+    await memory_service.capture_event(
         context=context,
         event_name=event_name,
         arguments_summary=arguments_summary,
@@ -88,11 +89,11 @@ def _finish_memory_context(
         token_metrics=token_metrics,
         metadata=metadata,
     )
-    memory_service.run_worker_once()
-    memory_service.end_session(context)
+    await memory_service.run_worker_once()
+    await memory_service.end_session(context)
 
 
-def _run_sync_once(
+async def _run_sync_once(
     storage: Storage,
     loaded_config: dict[str, Any],
     workspace_override: str | None = None,
@@ -103,7 +104,7 @@ def _run_sync_once(
     chunk_size = int(loaded_config["indexing"].get("chunk_size", 800))
     chunk_overlap = int(loaded_config["indexing"].get("chunk_overlap", 120))
 
-    stats = sync_workspace(
+    stats = await sync_workspace(
         storage=storage,
         workspace=workspace,
         root=project_root,
@@ -116,12 +117,12 @@ def _run_sync_once(
         for gdir in loaded_config["paths"].get("global_docs", []):
             p = Path(gdir)
             if p.exists():
-                sync_workspace(storage, "global", p, excludes, chunk_size, chunk_overlap)
+                await sync_workspace(storage, "global", p, excludes, chunk_size, chunk_overlap)
 
     return stats.__dict__
 
 
-def cmd_init(args: argparse.Namespace) -> int:
+async def cmd_init(args: argparse.Namespace) -> int:
     config_path = Path(args.config)
     if config_path.exists() and not args.force:
         print(f"Config already exists at {config_path}. Use --force to overwrite.")
@@ -136,8 +137,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     save_config(config_path, cfg)
 
-    storage = Storage(db_path(config_path.parent.resolve()))
-    storage.close()
+    storage = await Storage.create(db_path(config_path.parent.resolve()))
+    await storage.close()
     print(f"Initialized CodeIndex at {config_path}")
     return 0
 
@@ -154,19 +155,19 @@ def cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_sync(args: argparse.Namespace) -> int:
+async def cmd_sync(args: argparse.Namespace) -> int:
     config_path = Path(args.config)
     loaded = load_config(config_path)
     database_path = db_path(config_path.parent.resolve())
     workspace = args.workspace or loaded.data.get("workspace", "default")
     project_root = Path(loaded.data["paths"]["project_root"]).resolve()
 
-    with Storage(database_path) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        context = _start_memory_context(memory_service, workspace, project_root, "sync")
-        stats = _run_sync_once(storage, loaded.data, workspace_override=args.workspace)
+    async with await Storage.create(database_path) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        context = await _start_memory_context(memory_service, workspace, project_root, "sync")
+        stats = await _run_sync_once(storage, loaded.data, workspace_override=args.workspace)
         _json_print(stats)
-        _finish_memory_context(
+        await _finish_memory_context(
             memory_service,
             context,
             event_name="sync_completed",
@@ -180,17 +181,17 @@ def cmd_sync(args: argparse.Namespace) -> int:
             print(f"Watch mode enabled. Polling every {args.interval} seconds. Ctrl+C to stop.")
             try:
                 while True:
-                    time.sleep(args.interval)
-                    next_stats = _run_sync_once(storage, loaded.data, workspace_override=args.workspace)
+                    await asyncio.sleep(args.interval)
+                    next_stats = await _run_sync_once(storage, loaded.data, workspace_override=args.workspace)
                     if next_stats["indexed"] or next_stats["deleted"]:
                         _json_print(next_stats)
-                        memory_service.run_worker_once()
+                        await memory_service.run_worker_once()
             except KeyboardInterrupt:
                 print("Stopping watch mode")
     return 0
 
 
-def cmd_query(args: argparse.Namespace) -> int:
+async def cmd_query(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
     workspace = args.workspace or loaded.data.get("workspace", "default")
     if loaded.data["query"].get("require_workspace", True) and not workspace:
@@ -202,13 +203,13 @@ def cmd_query(args: argparse.Namespace) -> int:
     mode = args.mode or loaded.data["query"].get("mode", "hybrid")
     project_root = Path(loaded.data["paths"]["project_root"]).resolve()
 
-    with Storage(db_path(Path(args.config).parent.resolve())) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        context = _start_memory_context(memory_service, workspace, project_root, "query")
+    async with await Storage.create(db_path(Path(args.config).parent.resolve())) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        context = await _start_memory_context(memory_service, workspace, project_root, "query")
         memory_payload = {"results": []}
         if loaded.data["memory"].get("inject_on_query", True) and context is not None:
-            memory_payload = memory_service.inject(context, "query_executed", args.query)
-        _, scored, metrics = search_index(storage, args.query, workspace, include_global, top_k, mode)
+            memory_payload = await memory_service.inject(context, "query_executed", args.query)
+        _, scored, metrics = await search_index(storage, args.query, workspace, include_global, top_k, mode)
 
         results = [
             {
@@ -232,7 +233,7 @@ def cmd_query(args: argparse.Namespace) -> int:
             "memory": memory_payload,
         }
         _json_print(payload)
-        _finish_memory_context(
+        await _finish_memory_context(
             memory_service,
             context,
             event_name="query_executed",
@@ -244,20 +245,20 @@ def cmd_query(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_status(args: argparse.Namespace) -> int:
+async def cmd_status(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
     workspace = loaded.data.get("workspace", "default")
     project_root = Path(loaded.data["paths"]["project_root"]).resolve()
-    with Storage(db_path(Path(args.config).parent.resolve())) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        context = _start_memory_context(memory_service, workspace, project_root, "status")
-        counts = storage.counts()
+    async with await Storage.create(db_path(Path(args.config).parent.resolve())) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        context = await _start_memory_context(memory_service, workspace, project_root, "status")
+        counts = await storage.counts()
         counts["capabilities"] = {
             "vector": storage.capability_summary(),
-            "memory": memory_service.capability_summary(),
+            "memory": await memory_service.capability_summary(),
         }
         _json_print(counts)
-        _finish_memory_context(
+        await _finish_memory_context(
             memory_service,
             context,
             event_name="command_end",
@@ -277,8 +278,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
     allow_remote = bool(args.allow_remote or server_cfg.get("allow_remote", False))
     auth_token = args.auth_token if args.auth_token is not None else server_cfg.get("auth_token")
     auth_token_header = str(server_cfg.get("auth_token_header", "X-CodeIndex-Token"))
-    with Storage(database_path):
-        pass
+    
+    async def init_db():
+        async with await Storage.create(database_path):
+            pass
+    asyncio.run(init_db())
+    
     validate_bind_host(host, allow_remote)
     print(f"Serving on {host}:{port}")
     serve(
@@ -296,20 +301,20 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_analyze(args: argparse.Namespace) -> int:
+async def cmd_analyze(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
     root = Path(args.root or loaded.data["paths"]["project_root"]).resolve()
     excludes = list(loaded.data.get("excludes", []))
     prefer_tree_sitter = bool(loaded.data.get("analysis", {}).get("prefer_tree_sitter", True))
     workspace = loaded.data.get("workspace", "default")
 
-    with Storage(db_path(Path(args.config).parent.resolve())) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        context = _start_memory_context(memory_service, workspace, root, "analyze")
+    async with await Storage.create(db_path(Path(args.config).parent.resolve())) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        context = await _start_memory_context(memory_service, workspace, root, "analyze")
         memory_payload = {"results": []}
         if loaded.data["memory"].get("inject_on_analyze", True) and context is not None:
             injection_query = args.path or args.symbol or args.kind
-            memory_payload = memory_service.inject(context, "analysis_executed", injection_query)
+            memory_payload = await memory_service.inject(context, "analysis_executed", injection_query)
 
         kind = args.kind
         if kind == "files":
@@ -358,7 +363,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
         payload["memory"] = memory_payload
         _json_print(payload)
-        _finish_memory_context(
+        await _finish_memory_context(
             memory_service,
             context,
             event_name="analysis_executed",
@@ -369,16 +374,16 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_memory_status(args: argparse.Namespace) -> int:
+async def cmd_memory_status(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
     workspace = args.workspace or loaded.data.get("workspace", "default")
     project_root = Path(loaded.data["paths"]["project_root"]).resolve()
-    with Storage(db_path(Path(args.config).parent.resolve())) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        context = _start_memory_context(memory_service, workspace, project_root, "memory_status")
-        payload = memory_service.status(workspace)
+    async with await Storage.create(db_path(Path(args.config).parent.resolve())) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        context = await _start_memory_context(memory_service, workspace, project_root, "memory_status")
+        payload = await memory_service.status(workspace)
         _json_print(payload)
-        _finish_memory_context(
+        await _finish_memory_context(
             memory_service,
             context,
             event_name="command_end",
@@ -389,14 +394,14 @@ def cmd_memory_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_memory_search(args: argparse.Namespace) -> int:
+async def cmd_memory_search(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
     workspace = args.workspace or loaded.data.get("workspace", "default")
     project_root = Path(loaded.data["paths"]["project_root"]).resolve()
-    with Storage(db_path(Path(args.config).parent.resolve())) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        context = _start_memory_context(memory_service, workspace, project_root, "memory_search")
-        payload = memory_service.search(
+    async with await Storage.create(db_path(Path(args.config).parent.resolve())) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        context = await _start_memory_context(memory_service, workspace, project_root, "memory_search")
+        payload = await memory_service.search(
             workspace=workspace,
             query=args.query,
             layer=args.layer,
@@ -404,7 +409,7 @@ def cmd_memory_search(args: argparse.Namespace) -> int:
             max_results=args.top_k,
         )
         _json_print(payload)
-        _finish_memory_context(
+        await _finish_memory_context(
             memory_service,
             context,
             event_name="search_executed",
@@ -415,16 +420,16 @@ def cmd_memory_search(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_memory_expand(args: argparse.Namespace) -> int:
+async def cmd_memory_expand(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
     workspace = loaded.data.get("workspace", "default")
     project_root = Path(loaded.data["paths"]["project_root"]).resolve()
-    with Storage(db_path(Path(args.config).parent.resolve())) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        context = _start_memory_context(memory_service, workspace, project_root, "memory_expand")
-        payload = memory_service.expand(args.observation_id)
+    async with await Storage.create(db_path(Path(args.config).parent.resolve())) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        context = await _start_memory_context(memory_service, workspace, project_root, "memory_expand")
+        payload = await memory_service.expand(args.observation_id)
         _json_print(payload)
-        _finish_memory_context(
+        await _finish_memory_context(
             memory_service,
             context,
             event_name="search_executed",
@@ -434,30 +439,30 @@ def cmd_memory_expand(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_memory_session_list(args: argparse.Namespace) -> int:
+async def cmd_memory_session_list(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
     workspace = args.workspace or loaded.data.get("workspace", "default")
-    with Storage(db_path(Path(args.config).parent.resolve())) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        payload = {"workspace": workspace, "sessions": memory_service.list_sessions(workspace)}
+    async with await Storage.create(db_path(Path(args.config).parent.resolve())) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        payload = {"workspace": workspace, "sessions": await memory_service.list_sessions(workspace)}
         _json_print(payload)
     return 0
 
 
-def cmd_memory_session_show(args: argparse.Namespace) -> int:
+async def cmd_memory_session_show(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
-    with Storage(db_path(Path(args.config).parent.resolve())) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        payload = memory_service.get_session(args.session_id)
+    async with await Storage.create(db_path(Path(args.config).parent.resolve())) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        payload = await memory_service.get_session(args.session_id)
         _json_print(payload)
     return 0
 
 
-def cmd_memory_citations(args: argparse.Namespace) -> int:
+async def cmd_memory_citations(args: argparse.Namespace) -> int:
     loaded = load_config(Path(args.config))
-    with Storage(db_path(Path(args.config).parent.resolve())) as storage:
-        memory_service = _memory_service(storage, loaded.data)
-        payload = memory_service.citations(args.target_id)
+    async with await Storage.create(db_path(Path(args.config).parent.resolve())) as storage:
+        memory_service = await _memory_service(storage, loaded.data)
+        payload = await memory_service.citations(args.target_id)
         _json_print(payload)
     return 0
 
@@ -472,8 +477,12 @@ def cmd_memory_viewer(args: argparse.Namespace) -> int:
     auth_token = args.auth_token if args.auth_token is not None else server_cfg.get("auth_token")
     auth_token_header = str(server_cfg.get("auth_token_header", "X-CodeIndex-Token"))
     database_path = db_path(Path(args.config).parent.resolve())
-    with Storage(database_path):
-        pass
+    
+    async def init_db():
+        async with await Storage.create(database_path):
+            pass
+    asyncio.run(init_db())
+    
     validate_bind_host(host, allow_remote)
     print(f"Serving memory viewer on {host}:{port}")
     serve(
@@ -489,6 +498,37 @@ def cmd_memory_viewer(args: argparse.Namespace) -> int:
         auth_token_header=auth_token_header,
     )
     return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    print("CodeIndex System Health Check")
+    print("-" * 40)
+
+    deps = [
+        ("aiosqlite", "Required for async database access"),
+        ("tree_sitter", "Required for advanced code analysis"),
+        ("fastembed", "Required for high-quality local embeddings"),
+        ("sqlite_vec", "Optional but recommended for vector acceleration"),
+    ]
+
+    all_ok = True
+    for module_name, desc in deps:
+        try:
+            __import__(module_name)
+            status = "INSTALLED"
+        except ImportError:
+            status = "MISSING"
+            if module_name != "sqlite_vec":
+                all_ok = False
+        print(f"{module_name:<15}: {status} - {desc}")
+
+    print("-" * 40)
+    if all_ok:
+        print("System looks healthy!")
+        return 0
+    else:
+        print("Some required dependencies are missing.")
+        return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -524,6 +564,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_status = sp.add_parser("status")
     p_status.set_defaults(func=cmd_status)
+
+    p_doctor = sp.add_parser("doctor")
+    p_doctor.set_defaults(func=cmd_doctor)
 
     p_serve = sp.add_parser("serve")
     p_serve.add_argument("--host")
@@ -592,6 +635,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if asyncio.iscoroutinefunction(args.func):
+            return asyncio.run(args.func(args))
         return args.func(args)
     except (RuntimeError, ValueError) as exc:
         print(str(exc))

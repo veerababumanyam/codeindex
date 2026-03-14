@@ -34,7 +34,7 @@ def validate_mode(mode: str) -> list[str]:
     return MODE_TO_KINDS[mode]
 
 
-def search_index(
+async def search_index(
     storage: Storage,
     query: str,
     workspace: str,
@@ -54,7 +54,7 @@ def search_index(
 
     if storage.supports_vector_search():
         candidate_k = max(top_k * 8, top_k)
-        nearest = storage.vector_search(
+        nearest = await storage.vector_search(
             workspaces=workspaces,
             source_kinds=source_kinds,
             query_embedding=q_emb,
@@ -62,7 +62,7 @@ def search_index(
             query_terms=narrowed_terms or None,
         )
         if not nearest and narrowed_terms:
-            nearest = storage.vector_search(
+            nearest = await storage.vector_search(
                 workspaces=workspaces,
                 source_kinds=source_kinds,
                 query_embedding=q_emb,
@@ -80,13 +80,26 @@ def search_index(
                     if overlap:
                         score += 0.2 * overlap
             scored_vec.append(SearchResult(score=score, chunk=chunk))
+            
+        if scored_vec:
+            try:
+                from rank_bm25 import BM25Okapi
+                tokenized_corpus = [r.chunk.text.lower().split() for r in scored_vec]
+                bm25 = BM25Okapi(tokenized_corpus)
+                tokenized_query = query.lower().split()
+                bm25_scores = bm25.get_scores(tokenized_query)
+                for idx, r in enumerate(scored_vec):
+                    r.score += bm25_scores[idx] * 0.1
+            except ImportError:
+                pass
+
         selected = sorted(scored_vec, key=lambda item: item.score, reverse=True)[:top_k]
     else:
-        selected = _fallback_scan_top_k(storage, workspaces, source_kinds, q_emb, query_terms, narrowed_terms, top_k)
+        selected = await _fallback_scan_top_k(storage, workspaces, source_kinds, q_emb, query_terms, narrowed_terms, top_k)
 
     vector_backend = storage.vector_backend_name()
     context_tokens = sum(item.chunk.token_count for item in selected)
-    full_tokens = storage.workspace_token_count(workspaces)
+    full_tokens = await storage.workspace_token_count(workspaces)
     savings = max(0, full_tokens - context_tokens)
     savings_pct = 0 if full_tokens == 0 else round((savings / full_tokens) * 100)
     metrics: dict[str, int | str] = {
@@ -102,7 +115,7 @@ def search_index(
     return workspaces, selected, metrics
 
 
-def _fallback_scan_top_k(
+async def _fallback_scan_top_k(
     storage: Storage,
     workspaces: list[str],
     source_kinds: list[str],
@@ -114,9 +127,9 @@ def _fallback_scan_top_k(
     heap: list[tuple[float, int, SearchResult]] = []
     seen = 0
 
-    def score_candidates(use_prefilter: bool) -> None:
+    async def score_candidates(use_prefilter: bool) -> None:
         nonlocal seen
-        for chunk in storage.stream_chunks(
+        async for chunk in storage.stream_chunks(
             workspaces,
             source_kinds=source_kinds,
             query_terms=narrowed_terms if use_prefilter else None,
@@ -137,7 +150,7 @@ def _fallback_scan_top_k(
             if score > heap[0][0]:
                 heapq.heapreplace(heap, (score, seen, result))
 
-    score_candidates(use_prefilter=bool(narrowed_terms))
+    await score_candidates(use_prefilter=bool(narrowed_terms))
     if not heap and narrowed_terms:
-        score_candidates(use_prefilter=False)
+        await score_candidates(use_prefilter=False)
     return [item[2] for item in sorted(heap, key=lambda item: item[0], reverse=True)]

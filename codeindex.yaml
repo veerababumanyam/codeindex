@@ -1,6 +1,6 @@
 workspace: veerababumanyam/codeindex
 paths:
-  project_root: C:\Users\admin\Desktop\CodeSync
+  project_root: C:\Users\admin\Desktop\CodeIndex
   global_docs: []
 server:
   host: 127.0.0.1

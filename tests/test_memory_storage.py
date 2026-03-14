@@ -4,10 +4,13 @@ from codeindex.memory_models import MemoryObservation
 from codeindex.memory_storage import MemoryStorage, utc_now
 
 
-def test_memory_storage_degrades_cleanly_without_fts5(monkeypatch):
+import pytest
+
+@pytest.mark.asyncio
+async def test_memory_storage_degrades_cleanly_without_fts5(monkeypatch):
     monkeypatch.setenv("CODEINDEX_DISABLE_FTS5", "1")
-    conn = sqlite3.connect(":memory:")
-    storage = MemoryStorage(conn)
+    conn = await aiosqlite.connect(":memory:")
+    storage = await MemoryStorage.create(conn)
 
     observation = MemoryObservation(
         observation_id="obs_1",
@@ -24,8 +27,8 @@ def test_memory_storage_degrades_cleanly_without_fts5(monkeypatch):
         status="raw",
         metadata={},
     )
-    storage.add_observation(observation)
-    storage.mark_processed(
+    await storage.add_observation(observation)
+    await storage.mark_processed(
         queue_id=1,
         observation_id="obs_1",
         summary="authenticate summary",
@@ -34,9 +37,10 @@ def test_memory_storage_degrades_cleanly_without_fts5(monkeypatch):
         metadata={},
     )
 
-    hits = storage.search_observations("authenticate", "demo", limit=5, min_importance=0.0)
+    hits = await storage.search_observations("authenticate", "demo", limit=5, min_importance=0.0)
     assert hits
     assert hits[0].observation.observation_id == "obs_1"
+    await conn.close()
 
     status = storage.status("demo")
     assert status["capabilities"]["memory_search_backend"] == "sql-like"

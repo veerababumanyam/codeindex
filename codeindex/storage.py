@@ -3,10 +3,10 @@ from __future__ import annotations
 from array import array
 import json
 import os
-import sqlite3
+import aiosqlite
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Iterable, AsyncIterator
 
 from .memory_storage import MemoryStorage
 
@@ -65,100 +65,114 @@ class ChunkRecord:
 
 
 class Storage:
-    def __init__(self, db_path: Path) -> None:
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(db_path))
+    def __init__(self, conn: aiosqlite.Connection) -> None:
+        self.conn = conn
         self._vector_backend = "python-cosine"
-        self._try_enable_vector_extension()
-        self.conn.executescript(SCHEMA)
-        MemoryStorage(self.conn)
-        self._migrate_schema()
-        self._sync_vec_index()
-        self.conn.commit()
 
-    def _try_enable_vector_extension(self) -> None:
+    @classmethod
+    async def create(cls, db_path: Path) -> Storage:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = await aiosqlite.connect(str(db_path))
+        storage = cls(conn)
+        await storage._try_enable_vector_extension()
+        await storage.conn.executescript(SCHEMA)
+        await MemoryStorage.create(storage.conn)
+        await storage._migrate_schema()
+        await storage._sync_vec_index()
+        await storage.conn.commit()
+        return storage
+
+    async def _try_enable_vector_extension(self) -> None:
         if os.getenv("CODEINDEX_DISABLE_VECTORS", "").lower() in {"1", "true", "yes", "on"}:
             self._vector_backend = "python-cosine"
             return
-        if self._try_enable_sqlite_vec():
+        if await self._try_enable_sqlite_vec():
             self._vector_backend = "sqlite-vec"
             return
-        if self._try_enable_sqlite_vss():
+        if await self._try_enable_sqlite_vss():
             self._vector_backend = "sqlite-vss"
             return
         self._vector_backend = "python-cosine"
 
-    def _try_enable_sqlite_vec(self) -> bool:
+    async def _try_enable_sqlite_vec(self) -> bool:
         if sqlite_vec is None:
             return False
         try:
-            self.conn.enable_load_extension(True)
-            sqlite_vec.load(self.conn)
-            self.conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(embedding float[64])")
+            await self.conn.enable_load_extension(True)
+            await self.conn.run(sqlite_vec.load)
+            await self.conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(embedding float[64])")
             return True
         except Exception:
             return False
         finally:
             try:
-                self.conn.enable_load_extension(False)
+                await self.conn.enable_load_extension(False)
             except Exception:
                 pass
 
-    def _try_enable_sqlite_vss(self) -> bool:
+    async def _try_enable_sqlite_vss(self) -> bool:
         if sqlite_vss is None:
             return False
         try:
-            self.conn.enable_load_extension(True)
-            sqlite_vss.load(self.conn)
-            self.conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vss USING vss0(embedding(64))")
+            await self.conn.enable_load_extension(True)
+            await self.conn.run(sqlite_vss.load)
+            await self.conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vss USING vss0(embedding(64))")
             return True
         except Exception:
             return False
         finally:
             try:
-                self.conn.enable_load_extension(False)
+                await self.conn.enable_load_extension(False)
             except Exception:
                 pass
 
-    def _migrate_schema(self) -> None:
-        columns = {
-            row[1] for row in self.conn.execute("PRAGMA table_info(chunks)").fetchall()
-        }
+    async def _migrate_schema(self) -> None:
+        async with self.conn.execute("PRAGMA table_info(chunks)") as cursor:
+            rows = await cursor.fetchall()
+        columns = {row[1] for row in rows}
         if "source_kind" not in columns:
-            self.conn.execute("ALTER TABLE chunks ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'chunk'")
+            await self.conn.execute("ALTER TABLE chunks ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'chunk'")
         if "symbol_name" not in columns:
-            self.conn.execute("ALTER TABLE chunks ADD COLUMN symbol_name TEXT")
+            await self.conn.execute("ALTER TABLE chunks ADD COLUMN symbol_name TEXT")
         if "token_count" not in columns:
-            self.conn.execute("ALTER TABLE chunks ADD COLUMN token_count INTEGER NOT NULL DEFAULT 0")
-        file_columns = {
-            row[1] for row in self.conn.execute("PRAGMA table_info(files)").fetchall()
-        }
+            await self.conn.execute("ALTER TABLE chunks ADD COLUMN token_count INTEGER NOT NULL DEFAULT 0")
+        
+        async with self.conn.execute("PRAGMA table_info(files)") as cursor:
+            file_rows = await cursor.fetchall()
+        file_columns = {row[1] for row in file_rows}
         if "size" not in file_columns:
-            self.conn.execute("ALTER TABLE files ADD COLUMN size INTEGER NOT NULL DEFAULT 0")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_kind ON chunks(workspace, source_kind)")
+            await self.conn.execute("ALTER TABLE files ADD COLUMN size INTEGER NOT NULL DEFAULT 0")
+        await self.conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_kind ON chunks(workspace, source_kind)")
 
-    def _sync_vec_index(self) -> None:
+    async def _sync_vec_index(self) -> None:
         if not self.supports_vector_search():
             return
-        chunk_count = int(self.conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
+        async with self.conn.execute("SELECT COUNT(*) FROM chunks") as cursor:
+            row = await cursor.fetchone()
+            chunk_count = int(row[0]) if row else 0
+        
         vector_table = "chunk_vec" if self._vector_backend == "sqlite-vec" else "chunk_vss"
-        vec_count = int(self.conn.execute(f"SELECT COUNT(*) FROM {vector_table}").fetchone()[0])
+        async with self.conn.execute(f"SELECT COUNT(*) FROM {vector_table}") as cursor:
+            row = await cursor.fetchone()
+            vec_count = int(row[0]) if row else 0
+            
         if chunk_count == vec_count:
             return
-        self.conn.execute(f"DELETE FROM {vector_table}")
-        rows = self.conn.execute("SELECT id, embedding FROM chunks").fetchall()
+        await self.conn.execute(f"DELETE FROM {vector_table}")
+        async with self.conn.execute("SELECT id, embedding FROM chunks") as cursor:
+            rows = await cursor.fetchall()
         for chunk_id, raw_embedding in rows:
             vector_value = self._vector_value(raw_embedding)
-            self.conn.execute(f"INSERT INTO {vector_table}(rowid, embedding) VALUES(?, ?)", (chunk_id, vector_value))
+            await self.conn.execute(f"INSERT INTO {vector_table}(rowid, embedding) VALUES(?, ?)", (chunk_id, vector_value))
 
-    def close(self) -> None:
-        self.conn.close()
+    async def close(self) -> None:
+        await self.conn.close()
 
-    def __enter__(self) -> Storage:
+    async def __aenter__(self) -> Storage:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.close()
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
 
     @staticmethod
     def _encode_embedding(embedding: list[float]) -> bytes:
@@ -211,38 +225,39 @@ class Storage:
             return bytes(embedding_or_raw)
         return self._encode_embedding(self._decode_embedding(embedding_or_raw))
 
-    def file_state(self, workspace: str, path: str) -> tuple[str, float, int] | None:
-        row = self.conn.execute(
+    async def file_state(self, workspace: str, path: str) -> tuple[str, float, int] | None:
+        async with self.conn.execute(
             "SELECT content_hash, mtime, size FROM files WHERE workspace=? AND path=?",
             (workspace, path),
-        ).fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
         if not row:
             return None
         return row[0], float(row[1]), int(row[2])
 
-    def upsert_file(self, workspace: str, path: str, content_hash: str, mtime: float, size: int) -> None:
-        self.conn.execute(
+    async def upsert_file(self, workspace: str, path: str, content_hash: str, mtime: float, size: int) -> None:
+        await self.conn.execute(
             "INSERT INTO files(workspace,path,content_hash,mtime,size) VALUES(?,?,?,?,?) "
             "ON CONFLICT(workspace,path) DO UPDATE SET content_hash=excluded.content_hash, mtime=excluded.mtime, size=excluded.size",
             (workspace, path, content_hash, mtime, size),
         )
 
-    def replace_chunks(self, workspace: str, path: str, chunks: Iterable[ChunkRecord]) -> None:
-        old_ids = [
-            row[0]
-            for row in self.conn.execute(
-                "SELECT id FROM chunks WHERE workspace=? AND path=?",
-                (workspace, path),
-            ).fetchall()
-        ]
-        self.conn.execute("DELETE FROM chunks WHERE workspace=? AND path=?", (workspace, path))
+    async def replace_chunks(self, workspace: str, path: str, chunks: Iterable[ChunkRecord]) -> None:
+        async with self.conn.execute(
+            "SELECT id FROM chunks WHERE workspace=? AND path=?",
+            (workspace, path),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        old_ids = [row[0] for row in rows]
+        
+        await self.conn.execute("DELETE FROM chunks WHERE workspace=? AND path=?", (workspace, path))
         if self.supports_vector_search() and old_ids:
             placeholders = ",".join("?" for _ in old_ids)
             vector_table = "chunk_vec" if self._vector_backend == "sqlite-vec" else "chunk_vss"
-            self.conn.execute(f"DELETE FROM {vector_table} WHERE rowid IN ({placeholders})", tuple(old_ids))
+            await self.conn.execute(f"DELETE FROM {vector_table} WHERE rowid IN ({placeholders})", tuple(old_ids))
 
         for c in chunks:
-            cursor = self.conn.execute(
+            async with self.conn.execute(
                 "INSERT INTO chunks(workspace,path,chunk_index,line_start,line_end,source_kind,symbol_name,text,token_count,embedding) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
                     c.workspace,
@@ -256,37 +271,39 @@ class Storage:
                     c.token_count,
                     self._encode_embedding(c.embedding),
                 ),
-            )
+            ) as cursor:
+                lastrowid = cursor.lastrowid
+            
             if self.supports_vector_search():
                 vector_table = "chunk_vec" if self._vector_backend == "sqlite-vec" else "chunk_vss"
-                self.conn.execute(
+                await self.conn.execute(
                     f"INSERT INTO {vector_table}(rowid, embedding) VALUES(?, ?)",
-                    (cursor.lastrowid, self._vector_value(c.embedding)),
+                    (lastrowid, self._vector_value(c.embedding)),
                 )
 
-    def delete_missing_files(self, workspace: str, existing_paths: set[str]) -> int:
-        rows = self.conn.execute("SELECT path FROM files WHERE workspace=?", (workspace,)).fetchall()
+    async def delete_missing_files(self, workspace: str, existing_paths: set[str]) -> int:
+        async with self.conn.execute("SELECT path FROM files WHERE workspace=?", (workspace,)) as cursor:
+            rows = await cursor.fetchall()
         deleted = 0
         for (path,) in rows:
             if path not in existing_paths:
-                self.conn.execute("DELETE FROM files WHERE workspace=? AND path=?", (workspace, path))
+                await self.conn.execute("DELETE FROM files WHERE workspace=? AND path=?", (workspace, path))
                 if self.supports_vector_search():
-                    chunk_ids = [
-                        row[0]
-                        for row in self.conn.execute(
-                            "SELECT id FROM chunks WHERE workspace=? AND path=?",
-                            (workspace, path),
-                        ).fetchall()
-                    ]
+                    async with self.conn.execute(
+                        "SELECT id FROM chunks WHERE workspace=? AND path=?",
+                        (workspace, path),
+                    ) as cursor:
+                        chunk_rows = await cursor.fetchall()
+                    chunk_ids = [row[0] for row in chunk_rows]
                     if chunk_ids:
                         placeholders = ",".join("?" for _ in chunk_ids)
                         vector_table = "chunk_vec" if self._vector_backend == "sqlite-vec" else "chunk_vss"
-                        self.conn.execute(f"DELETE FROM {vector_table} WHERE rowid IN ({placeholders})", tuple(chunk_ids))
-                self.conn.execute("DELETE FROM chunks WHERE workspace=? AND path=?", (workspace, path))
+                        await self.conn.execute(f"DELETE FROM {vector_table} WHERE rowid IN ({placeholders})", tuple(chunk_ids))
+                await self.conn.execute("DELETE FROM chunks WHERE workspace=? AND path=?", (workspace, path))
                 deleted += 1
         return deleted
 
-    def vector_search(
+    async def vector_search(
         self,
         workspaces: list[str],
         source_kinds: list[str],
@@ -340,7 +357,8 @@ class Storage:
             sql += " AND (" + " OR ".join(filters) + ")"
 
         sql += " ORDER BY nearest.distance ASC"
-        rows = self.conn.execute(sql, tuple(params)).fetchall()
+        async with self.conn.execute(sql, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
         return [
             (
                 ChunkRecord(
@@ -360,12 +378,12 @@ class Storage:
             for r in rows
         ]
 
-    def stream_chunks(
+    async def stream_chunks(
         self,
         workspaces: list[str],
         source_kinds: list[str] | None = None,
         query_terms: list[str] | None = None,
-    ) -> Iterator[ChunkRecord]:
+    ) -> AsyncIterator[ChunkRecord]:
         placeholders = ",".join("?" for _ in workspaces)
         params: list[str] = list(workspaces)
         query = (
@@ -383,35 +401,45 @@ class Storage:
                 like_term = f"%{term}%"
                 params.extend([like_term, like_term])
             query += " AND (" + " OR ".join(filters) + ")"
-        cursor = self.conn.execute(query, tuple(params))
-        for r in cursor:
-            yield ChunkRecord(
-                workspace=r[0],
-                path=r[1],
-                chunk_index=r[2],
-                line_start=r[3],
-                line_end=r[4],
-                source_kind=r[5],
-                symbol_name=r[6],
-                text=r[7],
-                token_count=r[8],
-                embedding=self._decode_embedding(r[9]),
-            )
+        
+        async with self.conn.execute(query, tuple(params)) as cursor:
+            async for r in cursor:
+                yield ChunkRecord(
+                    workspace=r[0],
+                    path=r[1],
+                    chunk_index=r[2],
+                    line_start=r[3],
+                    line_end=r[4],
+                    source_kind=r[5],
+                    symbol_name=r[6],
+                    text=r[7],
+                    token_count=r[8],
+                    embedding=self._decode_embedding(r[9]),
+                )
 
-    def counts(self) -> dict[str, int]:
-        files = self.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
-        chunks = self.conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-        symbols = self.conn.execute("SELECT COUNT(*) FROM chunks WHERE source_kind='symbol'").fetchone()[0]
-        workspaces = self.conn.execute("SELECT COUNT(DISTINCT workspace) FROM files").fetchone()[0]
+    async def counts(self) -> dict[str, int]:
+        async with self.conn.execute("SELECT COUNT(*) FROM files") as cursor:
+            row = await cursor.fetchone()
+            files = row[0] if row else 0
+        async with self.conn.execute("SELECT COUNT(*) FROM chunks") as cursor:
+            row = await cursor.fetchone()
+            chunks = row[0] if row else 0
+        async with self.conn.execute("SELECT COUNT(*) FROM chunks WHERE source_kind='symbol'") as cursor:
+            row = await cursor.fetchone()
+            symbols = row[0] if row else 0
+        async with self.conn.execute("SELECT COUNT(DISTINCT workspace) FROM files") as cursor:
+            row = await cursor.fetchone()
+            workspaces = row[0] if row else 0
         return {"files": files, "chunks": chunks, "symbols": symbols, "workspaces": workspaces}
 
-    def workspace_token_count(self, workspaces: list[str]) -> int:
+    async def workspace_token_count(self, workspaces: list[str]) -> int:
         placeholders = ",".join("?" for _ in workspaces)
-        row = self.conn.execute(
+        async with self.conn.execute(
             f"SELECT COALESCE(SUM(token_count), 0) FROM chunks WHERE workspace IN ({placeholders}) AND source_kind='chunk'",
             tuple(workspaces),
-        ).fetchone()
-        return int(row[0] or 0)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return int(row[0] or 0) if row else 0
 
-    def commit(self) -> None:
-        self.conn.commit()
+    async def commit(self) -> None:
+        await self.conn.commit()

@@ -1,5 +1,16 @@
 __pycache__/
 *.pyc
 .codeindex/
-CodeSyncBackup/
+CodeIndexBackup/
 output/
+
+.venv/
+.env
+*.egg-info/
+dist/
+build/
+
+CodeSyncBackup/
+.pytest_cache/
+.vscode/
+.codex/

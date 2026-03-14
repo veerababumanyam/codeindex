@@ -19,6 +19,10 @@ Imagine your code is a massive library with thousands of books.
   - **🧠 It Remembers**: It keeps a record of what you've found or analyzed before, so the AI doesn't forget context halfway through a project.
   - **💻 100% Local**: Everything happens on *your* machine. No code is ever sent to a third-party server for indexing.
 
+![Platform Overview](public/Local%20AI%20Layer%20Platform%20Overview.png)
+
+
+
 ---
 
 ## 📑 Table of Contents
@@ -40,6 +44,10 @@ Imagine your code is a massive library with thousands of books.
 - **Zero Cost**: No external API calls or token fees for indexing.
 - **Hardware Agnostic**: Optimized for CPU performance (including Apple Silicon). No GPU required.
 - **Local Sovereignty**: Everything happens on your machine via SQLite and `sqlite-vec`.
+
+![Privacy-First Local Code Memory](public/Privacy-First%20Local%20Code%20Memory.png)
+
+
 
 ---
 

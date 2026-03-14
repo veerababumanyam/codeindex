@@ -12,7 +12,7 @@ LAYER_MULTIPLIERS = {
 }
 
 
-def search_memory(
+async def search_memory(
     storage: MemoryStorage,
     query: str,
     workspace: str,
@@ -22,7 +22,7 @@ def search_memory(
     min_importance: float,
 ) -> dict[str, Any]:
     selected_layer = layer if layer in LAYER_MULTIPLIERS else "summary"
-    hits = storage.search_observations(
+    hits = await storage.search_observations(
         query=query,
         workspace=workspace,
         limit=max_results,
@@ -80,11 +80,11 @@ def search_memory(
     }
 
 
-def expand_memory(storage: MemoryStorage, observation_id: str) -> dict[str, Any]:
-    observation = storage.get_observation(observation_id)
+async def expand_memory(storage: MemoryStorage, observation_id: str) -> dict[str, Any]:
+    observation = await storage.get_observation(observation_id)
     if observation is None:
         raise ValueError(f"Unknown observation id: {observation_id}")
-    citations = storage.list_citations(observation_id)
+    citations = await storage.list_citations(observation_id)
     return {
         "observation_id": observation.observation_id,
         "session_id": observation.session_id,

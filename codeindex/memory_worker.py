@@ -15,8 +15,8 @@ def _short_summary(observation: MemoryObservation) -> str:
     return body[:217] + "..."
 
 
-def process_pending_observations(storage: MemoryStorage, max_batch_size: int, max_retries: int) -> dict[str, int]:
-    claimed = storage.claim_queue(max_batch_size=max_batch_size, max_retries=max_retries)
+async def process_pending_observations(storage: MemoryStorage, max_batch_size: int, max_retries: int) -> dict[str, int]:
+    claimed = await storage.claim_queue(max_batch_size=max_batch_size, max_retries=max_retries)
     processed = 0
     failed = 0
     for queue_id, observation in claimed:
@@ -24,7 +24,7 @@ def process_pending_observations(storage: MemoryStorage, max_batch_size: int, ma
             metadata = dict(observation.metadata)
             metadata.setdefault("expanded_summary", observation.summary or _short_summary(observation))
             snippet = observation.summary or _short_summary(observation)
-            storage.mark_processed(
+            await storage.mark_processed(
                 queue_id=queue_id,
                 observation_id=observation.observation_id,
                 summary=_short_summary(observation),
@@ -34,8 +34,8 @@ def process_pending_observations(storage: MemoryStorage, max_batch_size: int, ma
             )
             processed += 1
         except Exception as exc:  # pragma: no cover - defensive
-            storage.mark_failed(queue_id=queue_id, error=str(exc))
+            await storage.mark_failed(queue_id=queue_id, error=str(exc))
             failed += 1
     if claimed:
-        storage.commit()
+        await storage.commit()
     return {"processed": processed, "failed": failed, "claimed": len(claimed)}

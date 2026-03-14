@@ -1,6 +1,6 @@
-# Proposed Improvements for CodeSync
+# Proposed Improvements for CodeIndex
 
-This document outlines architectural recommendations and feature enhancements for the CodeSync (CodeIndex) project based on a comprehensive review of the v0.0.3 codebase.
+This document outlines architectural recommendations and feature enhancements for the CodeIndex (CodeIndex) project based on a comprehensive review of the v0.0.3 codebase.
 
 ## 1. Advanced Semantic Retrieval
 Currently, the system uses a 64-dimensional hashing-based embedding (`embedding.py`). While efficient and dependency-free, it lacks true semantic understanding.
