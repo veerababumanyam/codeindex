@@ -35,13 +35,11 @@ Imagine your code is a massive library with thousands of books.
 
 ---
 
-## ✨ Core Philosophy
-
-Standard "Code RAG" often suffers from two problems: it's too expensive (API calls) or too superficial (simple string matching). **CodeIndex** solves this by operating entirely locally with a focus on:
-
-1.  **Precision over Noise**: Using AST-aware chunking and symbol-weighted search.
-2.  **Context Continuity**: Maintaining a "Project Memory" that tracks what you've learned or discovered during a session.
-3.  **Local Sovereignty**: Zero-latency, zero-cost embeddings and vector search running on your own machine via SQLite.
+### 100% Local & Private
+- **Zero-Latency Embeddings**: Uses a deterministic local hash-based embedding engine.
+- **Zero Cost**: No external API calls or token fees for indexing.
+- **Hardware Agnostic**: Optimized for CPU performance (including Apple Silicon). No GPU required.
+- **Local Sovereignty**: Everything happens on your machine via SQLite and `sqlite-vec`.
 
 ---
 
@@ -54,8 +52,8 @@ Standard "Code RAG" often suffers from two problems: it's too expensive (API cal
 
 ### ⚡ Professional Code Intelligence (`analyze`)
 Go beyond simple grep. Use the integrated analysis engine to query:
-- **Abstract Syntax Trees (AST)**: Search for specific node types (Classes, Functions, Imports).
-- **Dependency Graphs**: Map imports and relationship chains.
+- **Multi-Language AST**: Deep structural analysis for Python, JavaScript, TypeScript, Go, Rust, Java, C, and C++ (powered by Tree-sitter).
+- **Dependency Graphs**: Map imports and relationship chains across files.
 - **Complexity Metrics**: Identify technical debt and hotspots automatically.
 - **Usage Scanning**: Find every reference to a symbol across the entire repo.
 
@@ -99,7 +97,7 @@ pip install -e ".[analysis]"
 Initialize your project and perform the first indexing pass.
 ```bash
 codeindex init --path . --workspace my-project
-CodeIndex --watch
+codeindex sync --watch
 ```
 
 ### 2. Powerful Querying
@@ -169,9 +167,27 @@ When you use CodeIndex, it remembers. This keeps the AI "on track" by providing 
 
 ---
 
-## 🌐 Integration (API & MCP)
-
 CodeIndex ships with a full **Model Context Protocol (MCP)** implementation. This allows LLMs (like Claude Desktop or custom agents) to use CodeIndex as a toolset.
+
+### Claude Desktop Integration
+Add this to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "codeindex": {
+      "command": "python",
+      "args": [
+        "-m",
+        "codeindex.cli",
+        "serve",
+        "--port",
+        "9090"
+      ]
+    }
+  }
+}
+```
 
 **MCP Toolset includes:**
 - `codeindex_search`: Search the codebase semantically.
@@ -191,9 +207,8 @@ pytest
 
 ---
 
-## 🗺️ Roadmap
-
 - [x] **Web UI**: A unified dashboard for browsing the Index and Memory layers (Completed in v0.0.3).
+- [ ] **Git Integration**: Automatically respect `.gitignore` and prioritize recently changed files.
 - [ ] **Context Pruning**: AI-driven importance scoring for memory entries.
 
 

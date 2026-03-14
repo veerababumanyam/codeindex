@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codeindex-sync"
 version = "0.0.3"
-description = "Local-first code indexing and semantic retrieval"
+description = "Local, privacy-first Search Engine and Memory layer for codebases with native MCP support"
 requires-python = ">=3.10"
 dependencies = [
   "PyYAML>=6.0",
