@@ -1,274 +1,197 @@
 <p align="center">
-  <img src="logo.png" alt="CodeIndex Logo" width="200">
+  <img src="logo.png" alt="CodeIndex Logo" width="240">
 </p>
 
-# CodeIndex
+# 🧠 CodeIndex
 
-Local-first semantic code search, code intelligence analysis, and persistent project memory for AI-assisted development.
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.0.2-orange.svg)](pyproject.toml)
+[![Architecture](https://img.shields.io/badge/arch-Local--First-purple.svg)](#architecture)
 
-`CodeIndex` helps you index a repository into SQLite, run low-token semantic retrieval, analyze code structure (AST, symbols, dependencies, complexity, usage), and expose everything via CLI, HTTP, and MCP JSON-RPC tools.
+**CodeIndex** is a local-first, high-precision engine designed to bridge the gap between static codebases and dynamic AI development workflows. It transforms raw source code into a structured, queryable knowledge base optimized for **Semantic Search**, **Deep Code Intelligence**, and **Persistent Project Memory**.
 
-## Why CodeIndex
+---
 
-- Local-first: works without external embedding APIs by default.
-- Incremental indexing: only re-indexes changed files.
-- Workspace isolation: query one project while optionally including shared global docs.
-- Token efficiency: retrieval returns compact snippets plus token metrics.
-- Persistent memory: captures prior sessions and supports progressive disclosure (`summary`, `expanded`, `full`).
-- Multiple interfaces: CLI + REST endpoints + MCP tools for agent workflows.
+## 📑 Table of Contents
+- [✨ Core Philosophy](#-core-philosophy)
+- [🚀 Key Features](#-key-features)
+- [📦 Installation](#-installation)
+- [🛠️ Quick Start](#-quick-start)
+- [🏗️ Architecture](#-architecture)
+- [🔍 Deep Intelligence (Analyze)](#-deep-intelligence-analyze)
+- [🧠 Persistent Memory](#-persistent-memory)
+- [🌐 Integration (API & MCP)](#-integration-api--mcp)
+- [🧪 Testing](#-testing)
+- [🗺️ Roadmap](#-roadmap)
 
-## Core Features
+---
 
-### 1) Semantic Code Search
+## ✨ Core Philosophy
 
-- Indexes text chunks and lightweight symbols.
-- Supports `chunks`, `symbols`, and `hybrid` retrieval modes.
-- Returns ranked snippets with file path, line range, symbol metadata, and token counts.
+Standard "Code RAG" often suffers from two problems: it's too expensive (API calls) or too superficial (simple string matching). **CodeIndex** solves this by operating entirely locally with a focus on:
 
-### 2) Incremental Sync + Watch Mode
+1.  **Precision over Noise**: Using AST-aware chunking and symbol-weighted search.
+2.  **Context Continuity**: Maintaining a "Project Memory" that tracks what you've learned or discovered during a session.
+3.  **Local Sovereignty**: Zero-latency, zero-cost embeddings and vector search running on your own machine via SQLite.
 
-- Tracks file hash + mtime in SQLite.
-- Handles file additions, updates, and deletions.
-- `--watch` mode continuously polls and re-indexes deltas.
+---
 
-### 3) Integrated Code Analysis
+## 🚀 Key Features
 
-`codeindex analyze` supports:
+### 🔍 Semantic & Hybrid Search
+- **Local Vectors**: Powered by `sqlite-vec` or `sqlite-vss` for blazing-fast local similarity search.
+- **Hybrid Mode**: Combines semantic meaning with exact symbol matching to ensure "find auth logic" works as well as "find `LoginController`".
+- **Compact Snippets**: Returns context-stripped results to maximize token efficiency for LLM prompts.
 
-- `files`: list project files.
-- `symbols`: extract symbols for a file.
-- `ast`: query Python AST nodes.
-- `validate`: syntax validation.
-- `dependencies`: import/dependency analysis.
-- `complexity`: function/file complexity metrics.
-- `usage`: symbol reference scanning.
-- `stats`: project-level language/line/symbol summary.
+### ⚡ Professional Code Intelligence (`analyze`)
+Go beyond simple grep. Use the integrated analysis engine to query:
+- **Abstract Syntax Trees (AST)**: Search for specific node types (Classes, Functions, Imports).
+- **Dependency Graphs**: Map imports and relationship chains.
+- **Complexity Metrics**: Identify technical debt and hotspots automatically.
+- **Usage Scanning**: Find every reference to a symbol across the entire repo.
 
-### 4) Persistent Memory for Dev Workflows
+### 💾 Persistent Project Memory
+The `memory_*` subsystem records your development journey.
+- **Auto-Capture**: Every query and analysis is logged as a discrete "observation".
+- **Progressive Disclosure**: View summaries of past interactions or expand them into full citations.
+- **Session Tracking**: Organize work into coherent sessions for long-running feature implementations.
 
-- Auto-captures sync/query/analyze/MCP events.
-- Stores sessions, observations, citations, and stream events.
-- Supports progressive disclosure and stable IDs (`obs_...`, `cit_...`).
-- Includes memory viewer and stream endpoints.
+---
 
-### 5) API + MCP Server
-
-- HTTP search and analysis endpoints.
-- Memory API endpoints.
-- MCP-compatible `POST /mcp` with tools for search, analysis, and memory retrieval.
-
-## Architecture (High Level)
-
-- Storage: SQLite at `.codeindex/index.db`.
-- Vector search backend order:
-  - `sqlite-vec` (preferred)
-  - `sqlite-vss` (fallback)
-  - in-process cosine search (final fallback)
-- Embeddings: deterministic local embedding (no network required).
-- Isolation:
-  - workspace-specific index
-  - optional `global` workspace for shared docs
-  - project-local persistent memory.
-
-## Install
+## 📦 Installation
 
 ### Requirements
-
-- Python `>=3.10`
-- `pip`
+- Python `3.10` or higher
+- Windows, macOS, or Linux
 
 ### Setup
-
 ```bash
+# Create and activate environment
 python -m venv .venv
-# Linux/macOS
-source .venv/bin/activate
-# Windows (PowerShell)
-# .venv\Scripts\Activate.ps1
+source .venv/bin/activate  # Or .venv\Scripts\Activate.ps1 on Windows
 
+# Install core package
 pip install -e .
-```
 
-Optional analysis parsers:
-
-```bash
+# Install analysis dependencies (recommended)
 pip install -e ".[analysis]"
 ```
 
-## Quick Start
+---
 
+## 🛠️ Quick Start
+
+### 1. Initialize and Sync
+Initialize your project and perform the first indexing pass.
 ```bash
-codeindex init --path /myproject --workspace myapp --global-docs /shared
-CodeIndex
-codeindex query "find auth logic" --workspace myapp --top-k 5 --include-global --mode hybrid
-codeindex status
+codeindex init --path . --workspace my-project
+CodeIndex --watch
 ```
 
-Run continuous sync:
-
+### 2. Powerful Querying
 ```bash
-CodeIndex --watch --interval 2
+# Semantic search
+codeindex query "how is user authentication handled?" --mode hybrid
+
+# Deep AST analysis
+codeindex analyze ast --node-type ClassDef --name-contains Controller
 ```
 
-Serve locally by default:
-
+### 3. Start the Intelligence Server
+Expose all tools to your favorite AI agent via MCP.
 ```bash
-codeindex serve
+codeindex serve --port 9090
 ```
 
-Remote binds require an explicit opt-in:
+---
 
-```bash
-codeindex serve --host 0.0.0.0 --port 9090 --allow-remote
+## 🏗️ Architecture
+
+CodeIndex is built as a modular pipeline that moves code from disk to an actionable memory layer.
+
+```mermaid
+graph TD
+    A[Disk: Source Code] --> B[Indexer: AST & Chunks]
+    B --> C[(SQLite: Index DB)]
+    C --> D[Search: Semantic & Hybrid]
+    C --> E[Analyze: AST & Symbols]
+    D --> F[Memory: Observations & Sessions]
+    E --> F
+    F --> G[Client: CLI / HTTP / MCP]
 ```
 
-To protect HTTP and MCP routes, set `server.auth_token` in `codeindex.yaml` or pass `--auth-token` and send the same value in the `X-CodeIndex-Token` header.
+- **Storage**: `.codeindex/index.db` (SQLite + Vectors)
+- **Core modules**:
+  - `indexer.py`: File system synchronization and AST parsing.
+  - `storage.py`: Single-file SQLite interface for portability.
+  - `memory_service.py`: Orchestrates the persistent memory lifecycle.
 
-## CLI Commands
+---
 
-### Project + Search
+## 🔍 Deep Intelligence (Analyze)
 
-- `codeindex init`
-- `codeindex config <key> <value>`
-- `CodeIndex [--watch]`
-- `codeindex query "<text>" [--mode chunks|symbols|hybrid]`
-- `codeindex status`
+The `analyze` command is the "scalpel" of CodeIndex. 
 
-### Analysis
+| Command | Purpose | Edge Case / Power Tip |
+| :--- | :--- | :--- |
+| `files` | List tracked project files | Use `--limit` to avoid flooding stdout. |
+| `ast` | Query Python AST nodes | Filter by `node-type` or `name-contains`. |
+| `symbols` | Extract signatures & docs | Perfect for generating "symbol maps" for agents. |
+| `usage` | Find cross-file references | Essential for refactoring impact analysis. |
+| `stats` | Project summaries | See language distribution and symbol counts. |
 
-- `codeindex analyze files --limit 100`
-- `codeindex analyze symbols --path src/auth.py`
-- `codeindex analyze ast --path src/auth.py --node-type FunctionDef --name-contains login`
-- `codeindex analyze validate --path src/auth.py`
-- `codeindex analyze dependencies --path src/auth.py`
-- `codeindex analyze complexity --path src/auth.py`
-- `codeindex analyze usage --symbol login_user --limit 25`
-- `codeindex analyze stats`
+---
 
-### Memory
+## 🧠 Persistent Memory
 
-- `codeindex memory status`
-- `codeindex memory search "auth failure" --workspace myapp --layer summary`
-- `codeindex memory expand obs_123456789abc`
-- `codeindex memory session list --workspace myapp`
-- `codeindex memory session show <session_id>`
-- `codeindex memory citations <target_id>`
-- `codeindex memory viewer`
+When you use CodeIndex, it remembers. This keeps the AI "on track" by providing a history of discovered facts.
 
-## HTTP API
+- **Observations (`obs_...`)**: Discrete facts extracted during search.
+- **Citations (`cit_...`)**: Direct links to source code backing up observations.
+- **Layers**:
+  - `Summary`: High-level context (low tokens).
+  - `Expanded`: Detailed snippets.
+  - `Full`: The complete raw observation.
 
-Start server:
+---
 
-```bash
-codeindex serve --host 127.0.0.1 --port 9090
-```
+## 🌐 Integration (API & MCP)
 
-By default the server only allows loopback hosts (`127.0.0.1`, `localhost`, `::1`). Binding to a non-loopback address such as `0.0.0.0` fails unless `server.allow_remote: true` or `--allow-remote` is supplied intentionally.
+CodeIndex ships with a full **Model Context Protocol (MCP)** implementation. This allows LLMs (like Claude Desktop or custom agents) to use CodeIndex as a toolset.
 
-Remote exposure is loopback-only by default. Binding to `0.0.0.0`, a LAN IP, or any non-loopback host requires an explicit opt-in:
+**MCP Toolset includes:**
+- `codeindex_search`: Search the codebase semantically.
+- `codeindex_analyze`: Run deep structural analysis.
+- `codeindex_memory_status`: Check what the project currently remembers.
+- `codeindex_memory_search`: Retrieve past findings.
 
-```bash
-codeindex serve --host 0.0.0.0 --port 9090 --allow-remote
-```
+---
 
-Optional API token protection applies to both HTTP and MCP routes. Set `server.auth_token` in `codeindex.yaml` or pass `--auth-token` when starting the server, then include that value in the `X-CodeIndex-Token` header on each request.
+## 🧪 Testing
 
-Main endpoints:
-
-- `GET /search?query=...&workspace=...&top_k=5&include_global=true&mode=hybrid`
-- `GET /analysis/files`
-- `GET /analysis/symbols?path=src/auth.py`
-- `GET /analysis/ast?path=src/auth.py&node_type=FunctionDef`
-- `GET /analysis/validate?path=src/auth.py`
-- `GET /analysis/dependencies?path=src/auth.py`
-- `GET /analysis/complexity?path=src/auth.py`
-- `GET /analysis/usage?symbol=login_user`
-- `GET /analysis/stats`
-- `GET /memory/status?workspace=myapp`
-- `GET /memory/search?workspace=myapp&query=auth&layer=summary&budget=600`
-- `GET /memory/observations/<observation_id>`
-- `GET /memory/sessions?workspace=myapp`
-- `GET /memory/sessions/<session_id>`
-- `GET /memory/citations/<target_id>`
-- `GET /memory/viewer`
-- `GET /memory/stream?workspace=myapp`
-
-## MCP Integration
-
-Endpoint:
-
-```http
-POST /mcp
-```
-
-Supported tools:
-
-- `codeindex_search`
-- `codeindex_analyze`
-- `codeindex_memory_search`
-- `codeindex_memory_expand`
-- `codeindex_memory_session_list`
-- `codeindex_memory_session_show`
-- `codeindex_memory_status`
-
-Example:
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"tools/list"}
-```
-
-## Configuration
-
-Config file: `codeindex.yaml`  
-Sample: `docs/codeindex.example.yaml`
-
-Key sections:
-
-- `workspace`
-- `paths.project_root`
-- `paths.global_docs`
-- `server.host`
-- `server.port`
-- `server.allow_remote`
-- `server.auth_token`
-- `indexing.*`
-- `excludes`
-- `query.*`
-- `analysis.prefer_tree_sitter`
-- `server.auth_token_header`
-- `memory.*`
-
-## SEO/GEO Notes for GitHub Discoverability
-
-This README is intentionally optimized for:
-
-- GitHub search keywords: `semantic code search`, `local-first`, `SQLite vector search`, `MCP server`, `code intelligence`, `AST analysis`, `developer memory`.
-- AI answer engines (GEO): clear feature headings, explicit command examples, endpoint lists, and architecture terms aligned with common developer queries.
-
-## Testing
-
-Run test suite:
-
+We value stability. Our test suite covers CLI, HTTP, and internal logic.
 ```bash
 pytest
 ```
+*Current test coverage includes incremental sync, memory persistence, and MCP tool serialization.*
 
-Current tests cover:
+---
 
-- CLI flows (`init/sync/query/status`)
-- incremental sync behavior
-- analysis commands
-- server search + analysis endpoints
-- MCP tool listing and calls
-- memory CLI + HTTP + MCP paths
+## 🗺️ Roadmap
 
-## Roadmap Ideas
+- [ ] **Filesystem Events**: Transition from polling to native `watchdog` events.
+- [ ] **Multi-Language AST**: Broader support for JS/TS/Go via `tree-sitter`.
+- [ ] **Web UI**: A unified dashboard for browsing the Index and Memory layers.
+- [ ] **Context Pruning**: AI-driven importance scoring for memory entries.
 
-- Native filesystem event watcher (non-polling).
-- Additional language parsers and richer symbol extraction.
-- Optional external embedding providers.
-- Advanced ranking and reranking controls.
+---
 
-## License
+## ⚖️ License
 
-No license file is currently present in this repository. Add one (for example `MIT`) before public distribution.
+No license file is currently present. Defaulting to **All Rights Reserved** for now. Please add an `MIT` or `Apache-2.0` license before distributing publicly.
+
+---
+<p align="center">
+  Built with ❤️ for the AI Generation of Developers.
+</p>
