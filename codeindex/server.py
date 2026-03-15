@@ -29,6 +29,13 @@ from .storage import Storage
 
 app = FastAPI()
 
+@app.exception_handler(ValueError)
+async def value_error_exception_handler(request: Request, exc: ValueError):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": str(exc)},
+    )
+
 MCP_TOOLS = [
     {
         "name": "codeindex_search",
@@ -529,6 +536,11 @@ async def mcp_endpoint(request: Request, storage: Annotated[Storage, Depends(get
         if context is not None:
             await memory_service.end_session(context)
         return {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": -32602, "message": str(exc)}}
+    except HTTPException as exc:
+        if context is not None:
+            await memory_service.end_session(context)
+        code = -32602 if exc.status_code == 400 else -32000
+        return {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": code, "message": str(exc.detail)}}
     except Exception as exc:
         if context is not None:
             await memory_service.end_session(context)

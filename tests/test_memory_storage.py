@@ -1,4 +1,5 @@
 import sqlite3
+import aiosqlite
 
 from codeindex.memory_models import MemoryObservation
 from codeindex.memory_storage import MemoryStorage, utc_now
@@ -40,16 +41,22 @@ async def test_memory_storage_degrades_cleanly_without_fts5(monkeypatch):
     hits = await storage.search_observations("authenticate", "demo", limit=5, min_importance=0.0)
     assert hits
     assert hits[0].observation.observation_id == "obs_1"
-    await conn.close()
 
-    status = storage.status("demo")
+    status = await storage.status("demo")
     assert status["capabilities"]["memory_search_backend"] == "sql-like"
     assert status["capabilities"]["fts5_available"] is False
     assert status["capabilities"]["degraded"] is True
 
     try:
-        conn.execute("SELECT COUNT(*) FROM memory_observation_fts")
+        await conn.execute("SELECT COUNT(*) FROM memory_observation_fts")
     except sqlite3.OperationalError:
         pass
+    except Exception as e:
+        if "no such table" in str(e).lower() or "OperationalError" in str(type(e)):
+            pass
+        else:
+            raise
     else:
         raise AssertionError("memory_observation_fts should not exist when FTS5 is disabled")
+
+    await conn.close()
